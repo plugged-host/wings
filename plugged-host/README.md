@@ -7,9 +7,9 @@ plugged.host's: the build profile's scripts, the service and this guide.
 
 ## Build and deploy
 
-Never build on the panel box. `build.sh` copies the tree to the build VM (ssh alias `calagopus-build`,
-the panel's build VM), builds the `plugged-host` profile (thin LTO, see `Cargo.toml`) and fetches the
-binary. `wings-rs version` names the commit (`1.2.5:<commit>@main`).
+Never build on the panel box. `build.sh` copies the tree to the build host (ssh alias `plugged-build`,
+the box that builds the panel), builds the `plugged-host` profile (no LTO, incremental, see
+`Cargo.toml`) and fetches the binary. `wings-rs version` names the commit (`1.2.5:<commit>@main`).
 
 ```bash
 git commit … && git push              # the binary names the commit

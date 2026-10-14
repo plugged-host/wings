@@ -3,14 +3,14 @@
 #
 #   plugged-host/build.sh            # -> target/plugged-host/wings-rs
 #
-# The build host is an ssh alias (BUILD_HOST, default calagopus-build, the same VM that builds the
-# panel) with Rust; never build on the panel box. The repository is copied over with its .git, so
+# The build host is an ssh alias (BUILD_HOST, default plugged-build, the Ryzen box that builds the
+# panel too) with Rust; never build on the panel box. The repository is copied over with its .git, so
 # the binary knows its commit (`wings-rs version` -> 1.2.5:<commit>@main). Commit before building
 # anything that gets deployed.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BUILD_HOST=${BUILD_HOST:-calagopus-build}
+BUILD_HOST=${BUILD_HOST:-plugged-build}
 BUILD_DIR=${BUILD_DIR:-/root/wings}
 PROFILE=${PROFILE:-plugged-host}
 OUT="$ROOT/target/plugged-host"
