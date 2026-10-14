@@ -59,3 +59,17 @@ codegen-units = 1
 strip = true
 # too much of a coward to enable
 # panic = "abort"
+
+# plugged.host: a faster build for plugged.host's nodes (plugged-host/build.sh). Thin LTO and
+# parallel codegen instead of release's fat LTO and one codegen unit; incremental on the build VM.
+[profile.plugged-host]
+inherits = "release"
+opt-level = 2
+lto = "thin"
+codegen-units = 16
+incremental = true
+strip = true
+
+[profile.plugged-host.package."*"]
+opt-level = 2
+codegen-units = 16

@@ -1,0 +1,22 @@
+# plugged.host: Calagopus Wings (github.com/plugged-host/wings), next to Pelican Wings (wings.service).
+# Its own config, data (/var/lib/calagopus-wings), ports (API 8443, SFTP 2023) and Docker network
+# (calagopus_nw, 172.19.0.0/16); --config is pinned so it never reads /etc/pelican/config.yml.
+[Unit]
+Description=Calagopus Wings Daemon
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+User=root
+KillMode=process
+LimitNOFILE=4096
+PIDFile=/run/calagopus-wings/daemon.pid
+ExecStart=/usr/local/bin/calagopus-wings --config /etc/calagopus-wings/config.yml
+Restart=on-failure
+StartLimitInterval=180
+StartLimitBurst=30
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
