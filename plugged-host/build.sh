@@ -24,6 +24,8 @@ rsync -a --delete --exclude target --exclude application/bins "$ROOT/" "$BUILD_H
 
 echo "==> building (profile $PROFILE)"
 ssh "$BUILD_HOST" "set -euo pipefail
+  # The build host is also the prod panel box (since 2026-10-17): builds yield CPU and disk to it.
+  renice -n 15 -p \$\$ >/dev/null; ionice -c 3 -p \$\$
   . \$HOME/.cargo/env
   cd '$BUILD_DIR'
   RUSTFLAGS='-C link-arg=-fuse-ld=mold' cargo build --profile '$PROFILE' -p wings-rs"
