@@ -837,7 +837,9 @@ impl Filesystem {
 
                 archive_path.push(component);
 
+                // plugged.host: a .jar is a zip too, read for its plugin.yml / mods.toml
                 if component_str.ends_with(".zip")
+                    || component_str.ends_with(".jar")
                     || component_str.ends_with(".7z")
                     || component_str.ends_with(".ddup")
                 {
@@ -878,7 +880,8 @@ impl Filesystem {
 
             let archive_fs: Arc<dyn VirtualReadableFilesystem> =
                 match archive_path.extension().and_then(|ext| ext.to_str()) {
-                    Some("zip") => {
+                    Some("zip" | "jar") => {
+                        // plugged.host: .jar
                         match virtualfs::archive::zip::VirtualZipArchive::open(
                             server.clone(),
                             &archive_path,
