@@ -5,13 +5,27 @@ counterpart of plugged.host's panel ([plugged-host/panel](https://github.com/plu
 plugged.host's changes go directly into this source, like the panel's; this folder holds what is only
 plugged.host's: the build profile's scripts, the service and this guide.
 
+## What the fork changes
+
+Every changed upstream line carries a `plugged.host` comment, every new file a `plugged.host:` header
+(`git grep -n "plugged.host"`). The panel's [`docs/wings.md`](https://github.com/plugged-host/panel/blob/main/docs/wings.md)
+says which panel feature needs which addition.
+
+| Change | Where |
+|---|---|
+| `GET /api/public/resources` without a token, for any origin: memory, disk (the data directory's filesystem) and CPU as total, used, free and allocated to servers. `api.public_resources: false` turns it off | `routes/api/public/`, `config.rs`, `main.rs` (`handle_cors`), `stats.rs` (accessors) |
+| `GET /api/system/load`, `GET /api/system/processes`, `GET /api/servers/{server}/processes`: load, and every container's processes and connections from `/proc` (for the panel's abuse protection; replaces a separate node agent) | `processes.rs`, `routes/api/system/{load,processes}.rs`, `routes/api/servers/_server_/processes.rs` |
+| A schedule's restart step only restarts a running server | `server/schedule/actions.rs` |
+| Build profile `release-fast` (no LTO, incremental) | `Cargo.toml` |
+
 ## Build and deploy
 
 Never build on the panel box. `build.sh` copies the tree to the build host (ssh alias `plugged-build`,
-the box that builds the panel), builds the `plugged-host` profile (no LTO, incremental, see
+the box that builds the panel), builds the `release-fast` profile (no LTO, incremental, see
 `Cargo.toml`) and fetches the binary. `wings-rs version` names the commit (`1.2.5:<commit>@main`).
 
 ```bash
+plugged-host/check.sh                 # rustfmt (files copied back), clippy, tests, on the build host
 git commit … && git push              # the binary names the commit
 plugged-host/build.sh                 # -> target/plugged-host/wings-rs
 plugged-host/deploy.sh <node>         # -> /usr/local/bin/calagopus-wings, restart, health check, rollback

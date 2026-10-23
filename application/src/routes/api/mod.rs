@@ -13,6 +13,7 @@ use utoipa_axum::router::OpenApiRouter;
 mod backups;
 mod deauthorize_user;
 mod ports;
+mod public; // plugged.host
 pub mod servers;
 mod system;
 mod transfers;
@@ -66,6 +67,7 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
                 .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth)),
         )
         .nest("/transfers", transfers::router(state))
+        .nest("/public", public::router(state)) // plugged.host: no token
         .nest(
             "/servers",
             servers::router(state)

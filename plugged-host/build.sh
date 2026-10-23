@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILD_HOST=${BUILD_HOST:-plugged-build}
 BUILD_DIR=${BUILD_DIR:-/root/wings}
-PROFILE=${PROFILE:-plugged-host}
+PROFILE=${PROFILE:-release-fast}
 OUT="$ROOT/target/plugged-host"
 
 if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]; then
@@ -20,7 +20,7 @@ if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]; then
 fi
 
 echo "==> copying the tree to $BUILD_HOST:$BUILD_DIR"
-rsync -a --delete --exclude target --exclude application/bins "$ROOT/" "$BUILD_HOST:$BUILD_DIR/"
+rsync -a --delete --exclude target --exclude application/bins --exclude application/seccomp.min.json "$ROOT/" "$BUILD_HOST:$BUILD_DIR/"
 
 echo "==> building (profile $PROFILE)"
 ssh "$BUILD_HOST" "set -euo pipefail
@@ -28,6 +28,8 @@ ssh "$BUILD_HOST" "set -euo pipefail
   renice -n 15 -p \$\$ >/dev/null; ionice -c 3 -p \$\$
   . \$HOME/.cargo/env
   cd '$BUILD_DIR'
+  # build.rs writes seccomp.min.json, only when seccomp.json looks changed
+  [ -f application/seccomp.min.json ] || touch application/seccomp.json
   RUSTFLAGS='-C link-arg=-fuse-ld=mold' cargo build --profile '$PROFILE' -p wings-rs"
 
 mkdir -p "$OUT"

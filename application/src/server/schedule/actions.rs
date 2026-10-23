@@ -624,6 +624,14 @@ impl ScheduleAction {
                 return Err("timeout while waiting for matching console output.".into());
             }
             ScheduleAction::SendPower { action, .. } => {
+                // plugged.host: a schedule restarts a running server only. Starting a stopped one
+                // goes through the panel's start gates (panel docs/features/start-gates.md).
+                if *action == crate::models::ServerPowerAction::Restart
+                    && server.state.get_state() == crate::server::state::ServerState::Offline
+                {
+                    return Err("server is not running.".into());
+                }
+
                 match server.checked_power_action(*action).await {
                     Ok(()) => {
                         server.activity.log_activity(Activity {

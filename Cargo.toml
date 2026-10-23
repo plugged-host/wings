@@ -60,9 +60,9 @@ strip = true
 # too much of a coward to enable
 # panic = "abort"
 
-# plugged.host: a faster build for plugged.host's nodes (plugged-host/build.sh). No LTO and
+# plugged.host: release-fast, a faster build (plugged-host/build.sh uses it). No LTO and
 # parallel, incremental codegen instead of release's fat LTO and one codegen unit.
-[profile.plugged-host]
+[profile.release-fast]
 inherits = "release"
 opt-level = 2
 lto = "off"
@@ -70,6 +70,6 @@ codegen-units = 16
 incremental = true
 strip = true
 
-[profile.plugged-host.package."*"]
+[profile.release-fast.package."*"]
 opt-level = 2
 codegen-units = 16

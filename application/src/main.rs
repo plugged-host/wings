@@ -32,6 +32,7 @@ mod io;
 mod models;
 mod net;
 mod payload;
+mod processes; // plugged.host
 mod remote;
 mod response;
 mod routes;
@@ -315,6 +316,12 @@ async fn handle_cors(
                 break;
             }
         }
+    }
+
+    // plugged.host: the public routes (routes/api/public) answer any origin, without credentials
+    if req.uri().path().starts_with("/api/public/") {
+        headers.remove("Access-Control-Allow-Credentials");
+        headers.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
     }
 
     if !headers.contains_key("Access-Control-Allow-Origin") {

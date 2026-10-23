@@ -4,8 +4,10 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 mod backups;
 mod config;
 mod ips;
+mod load; // plugged.host
 mod logs;
 mod overview;
+mod processes; // plugged.host
 mod restic;
 mod stats;
 mod upgrade;
@@ -71,6 +73,8 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
         .routes(routes!(get::route))
         .nest("/overview", overview::router(state))
         .nest("/ips", ips::router(state))
+        .nest("/load", load::router(state)) // plugged.host
+        .nest("/processes", processes::router(state)) // plugged.host
         .nest("/logs", logs::router(state))
         .nest("/upgrade", upgrade::router(state))
         .nest("/config", config::router(state))

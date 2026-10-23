@@ -125,6 +125,10 @@ fn api_max_jwt_uses() -> usize {
 fn api_request_log_limit() -> usize {
     250
 }
+// plugged.host: the node's capacity is public unless turned off (see routes/api/public)
+fn api_public_resources() -> bool {
+    true
+}
 
 fn system_root_directory() -> SystemPath {
     #[cfg(unix)]
@@ -809,6 +813,9 @@ nestify::nest! {
             pub max_jwt_uses: usize,
             #[serde(default = "api_request_log_limit")]
             pub request_log_limit: usize,
+            /// plugged.host: answer `GET /api/public/resources` (the node's RAM, disk and CPU) without a token
+            #[serde(default = "api_public_resources")]
+            pub public_resources: bool,
             #[serde(default)]
             #[schema(value_type = Vec<String>)]
             pub trusted_proxies: Vec<cidr::IpCidr>,

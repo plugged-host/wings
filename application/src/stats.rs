@@ -51,6 +51,34 @@ pub struct SystemStats {
     disk: SystemDiskStats,
 }
 
+// plugged.host: what the public resources route reads (routes/api/public/resources.rs)
+impl SystemStats {
+    #[inline]
+    pub fn cpu_used(&self) -> f32 {
+        self.cpu.used
+    }
+
+    #[inline]
+    pub fn cpu_threads(&self) -> usize {
+        self.cpu.threads
+    }
+
+    #[inline]
+    pub fn cpu_model(&self) -> &str {
+        &self.cpu.model
+    }
+
+    #[inline]
+    pub fn memory_used(&self) -> u64 {
+        self.memory.used
+    }
+
+    #[inline]
+    pub fn memory_total(&self) -> u64 {
+        self.memory.total
+    }
+}
+
 pub struct StatsManager {
     stats: Arc<arc_swap::ArcSwap<SystemStats>>,
 }
