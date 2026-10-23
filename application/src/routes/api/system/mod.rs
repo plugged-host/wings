@@ -6,6 +6,7 @@ mod config;
 mod ips;
 mod load; // plugged.host
 mod logs;
+mod orphans; // plugged.host
 mod overview;
 mod processes; // plugged.host
 mod restic;
@@ -75,6 +76,7 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
         .nest("/ips", ips::router(state))
         .nest("/load", load::router(state)) // plugged.host
         .nest("/processes", processes::router(state)) // plugged.host
+        .nest("/orphans", orphans::router(state)) // plugged.host
         .nest("/logs", logs::router(state))
         .nest("/upgrade", upgrade::router(state))
         .nest("/config", config::router(state))
