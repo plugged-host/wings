@@ -327,6 +327,16 @@ nestify::nest! {
             pub swap: i64,
             pub io_weight: Option<u16>,
             pub cpu_limit: i64,
+            /// plugged.host: the container's relative CPU weight, as Docker's CPU shares (1024 is
+            /// a default container's). The panel weighs the paid CPU, so under contention it wins
+            /// over CPU a server may only borrow (burst). Applied live; `None` leaves the host
+            /// default.
+            #[serde(default)]
+            pub cpu_weight: Option<u32>,
+            /// plugged.host: the part of `cpu_limit` the server only borrows (burst cores); left
+            /// out of what the node counts as allocated.
+            #[serde(default)]
+            pub cpu_burst: Option<u32>,
             pub disk_space: u64,
             pub threads: Option<compact_str::CompactString>,
             pub oom_disabled: bool,
@@ -485,6 +495,8 @@ impl ServerConfiguration {
                 swap: 1024,
                 io_weight: Some(500),
                 cpu_limit: 2,
+                cpu_weight: None, // plugged.host
+                cpu_burst: None,  // plugged.host
                 disk_space: 10240,
                 threads: None,
                 oom_disabled: false,
@@ -778,6 +790,8 @@ impl ServerConfiguration {
                 },
             },
             blkio_weight: self.build.io_weight,
+            // plugged.host: Docker takes shares from 2 to 262144
+            cpu_shares: self.build.cpu_weight.map(|w| (w as i64).clamp(2, 262_144)),
             oom_kill_disable: Some(self.build.oom_disabled),
             pids_limit: match config.load().docker.container_pid_limit {
                 0 => None,
@@ -1048,6 +1062,23 @@ mod tests {
     #[test]
     fn convert_container_resources_leaves_cpu_shares_at_the_host_default() {
         assert_eq!(resources(2048, 0).cpu_shares, None);
+    }
+
+    // plugged.host
+    #[test]
+    fn convert_container_resources_turns_the_cpu_weight_into_clamped_shares() {
+        let config = tokio_test::block_on(async { crate::config::Config::mock() });
+        let mut configuration = ServerConfiguration::mock(uuid::Uuid::new_v4());
+
+        for (weight, shares) in [(2048, 2048), (1, 2), (1_000_000, 262_144)] {
+            configuration.build.cpu_weight = Some(weight);
+            assert_eq!(
+                configuration
+                    .convert_container_resources(&config)
+                    .cpu_shares,
+                Some(shares)
+            );
+        }
     }
 
     // Mount::resolve_allowed_source

@@ -65,7 +65,8 @@ mod get {
             let build = &server.configuration.read().await.build;
             memory_allocated += mib(build.memory_limit);
             disk_allocated += build.disk_space * MIB;
-            cpu_allocated += build.cpu_limit.max(0) as u64;
+            // borrowed CPU (burst cores) is not allocated
+            cpu_allocated += (build.cpu_limit - build.cpu_burst.unwrap_or(0) as i64).max(0) as u64;
         }
 
         let data_directory = state

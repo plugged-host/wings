@@ -623,6 +623,7 @@ impl DockerServerConfigurationExt for crate::server::configuration::ServerConfig
                 memory_swap: resources.memory_swap,
                 cpu_quota: resources.cpu_quota,
                 cpu_period: resources.cpu_period,
+                cpu_shares: resources.cpu_shares, // plugged.host
                 cpuset_cpus: resources.cpuset_cpus,
                 cpuset_mems: resources.cpuset_mems,
                 pids_limit: resources.pids_limit,
@@ -721,6 +722,7 @@ impl DockerServerConfigurationExt for crate::server::configuration::ServerConfig
             memory_swap: resources.memory_swap,
             cpu_quota: resources.cpu_quota,
             cpu_period: resources.cpu_period,
+            cpu_shares: resources.cpu_shares, // plugged.host
             cpuset_cpus: resources.cpuset_cpus,
             cpuset_mems: resources.cpuset_mems,
             pids_limit: resources.pids_limit,

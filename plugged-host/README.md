@@ -16,6 +16,7 @@ says which panel feature needs which addition.
 | `GET /api/public/resources` without a token, for any origin: memory, disk (the data directory's filesystem) and CPU as total, used, free and allocated to servers. `api.public_resources: false` turns it off | `routes/api/public/`, `config.rs`, `main.rs` (`handle_cors`), `stats.rs` (accessors) |
 | `GET /api/system/load`, `GET /api/system/processes`, `GET /api/servers/{server}/processes`: load, and every container's processes and connections from `/proc` (for the panel's abuse protection; replaces a separate node agent) | `processes.rs`, `routes/api/system/{load,processes}.rs`, `routes/api/servers/_server_/processes.rs` |
 | `POST /api/system/orphans`: removes what a server the panel moved away by node failover left on this node (the panel sends its configuration, which this node no longer gets) | `routes/api/system/orphans.rs` |
+| `build.cpu_weight` in a server's configuration: the container's CPU shares, set on create and live on every sync, so the panel can raise the CPU limit for burst cores while paid CPU keeps the weight; `build.cpu_burst`: the borrowed part of the CPU limit, left out of `/api/public/resources`' allocated CPU | `server/configuration/mod.rs`, `server/executor/docker/mod.rs`, `routes/api/public/resources.rs` |
 | A schedule's restart step only restarts a running server | `server/schedule/actions.rs` |
 | Build profile `release-fast` (no LTO, incremental) | `Cargo.toml` |
 
