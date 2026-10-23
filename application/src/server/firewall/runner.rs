@@ -2,8 +2,32 @@ use futures::StreamExt;
 use std::{collections::HashMap, sync::Arc};
 use tokio::io::AsyncWriteExt;
 
-pub const HELPER_CONTAINER_NAME: &str = "calagopus-wings-firewall";
-const HELPER_CONTAINER_TYPE: &str = "firewall_helper";
+pub struct HelperContainer {
+    pub name: &'static str,
+    pub container_type: &'static str,
+    pub network_mode: &'static str,
+    pub pid_mode: Option<&'static str>,
+    pub cap_add: &'static [&'static str],
+}
+
+impl HelperContainer {
+    fn owns(&self, inspect: &bollard::models::ContainerInspectResponse) -> bool {
+        inspect
+            .config
+            .as_ref()
+            .and_then(|config| config.labels.as_ref())
+            .and_then(|labels| labels.get("ContainerType"))
+            .is_some_and(|value| value == self.container_type)
+    }
+}
+
+pub const FIREWALL_HELPER: HelperContainer = HelperContainer {
+    name: "calagopus-wings-firewall",
+    container_type: "firewall_helper",
+    network_mode: "host",
+    pid_mode: None,
+    cap_add: &["NET_ADMIN"],
+};
 
 type ExecOutput = std::pin::Pin<
     Box<
@@ -147,15 +171,22 @@ impl StreamingCommand {
 
 pub struct DockerHelper {
     docker: Arc<bollard::Docker>,
+    spec: &'static HelperContainer,
     image: String,
     service_label: String,
     ensure_lock: tokio::sync::Mutex<()>,
 }
 
 impl DockerHelper {
-    pub fn new(docker: Arc<bollard::Docker>, image: String, service_label: String) -> Self {
+    pub fn new(
+        docker: Arc<bollard::Docker>,
+        spec: &'static HelperContainer,
+        image: String,
+        service_label: String,
+    ) -> Self {
         Self {
             docker,
+            spec,
             image,
             service_label,
             ensure_lock: tokio::sync::Mutex::new(()),
@@ -165,21 +196,12 @@ impl DockerHelper {
     pub async fn ensure(&self) -> Result<(), anyhow::Error> {
         let _guard = self.ensure_lock.lock().await;
 
-        match self
-            .docker
-            .inspect_container(HELPER_CONTAINER_NAME, None)
-            .await
-        {
+        match self.docker.inspect_container(self.spec.name, None).await {
             Ok(inspect) => {
-                let owned = inspect
-                    .config
-                    .as_ref()
-                    .and_then(|config| config.labels.as_ref())
-                    .and_then(|labels| labels.get("ContainerType"))
-                    .is_some_and(|value| value == HELPER_CONTAINER_TYPE);
-                if !owned {
+                if !self.spec.owns(&inspect) {
                     return Err(anyhow::anyhow!(
-                        "container name {HELPER_CONTAINER_NAME} is taken by a container that was not created by wings, refusing to replace it"
+                        "container name {} is taken by a container that was not created by wings, refusing to replace it",
+                        self.spec.name
                     ));
                 }
 
@@ -189,19 +211,21 @@ impl DockerHelper {
                     .and_then(|state| state.running)
                     .unwrap_or(false)
                     && inspect.image.as_deref() == Some(self.image.as_str())
-                    && inspect
-                        .host_config
-                        .as_ref()
-                        .and_then(|host_config| host_config.network_mode.as_deref())
-                        == Some("host");
+                    && inspect.host_config.as_ref().is_some_and(|host_config| {
+                        host_config.network_mode.as_deref() == Some(self.spec.network_mode)
+                            && host_config
+                                .pid_mode
+                                .as_deref()
+                                .filter(|mode| !mode.is_empty())
+                                == self.spec.pid_mode
+                    });
                 if adoptable {
                     return Ok(());
                 }
 
-                self.remove_helper(
-                    &inspect
-                        .id
-                        .unwrap_or_else(|| HELPER_CONTAINER_NAME.to_string()),
+                force_remove(
+                    &self.docker,
+                    &inspect.id.unwrap_or_else(|| self.spec.name.to_string()),
                 )
                 .await?;
             }
@@ -217,25 +241,18 @@ impl DockerHelper {
     pub async fn remove(&self) -> Result<(), anyhow::Error> {
         let _guard = self.ensure_lock.lock().await;
 
-        self.remove_helper(HELPER_CONTAINER_NAME).await
+        force_remove(&self.docker, self.spec.name).await
     }
 
-    async fn remove_helper(&self, id: &str) -> Result<(), anyhow::Error> {
-        match self
-            .docker
-            .remove_container(
-                id,
-                Some(bollard::query_parameters::RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(bollard::errors::Error::DockerResponseServerError {
-                status_code: 404 | 409,
-                ..
+    pub async fn remove_stale(
+        docker: &bollard::Docker,
+        spec: &HelperContainer,
+    ) -> Result<(), anyhow::Error> {
+        match docker.inspect_container(spec.name, None).await {
+            Ok(inspect) if spec.owns(&inspect) => force_remove(docker, spec.name).await,
+            Ok(_)
+            | Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 404, ..
             }) => Ok(()),
             Err(err) => Err(err.into()),
         }
@@ -251,12 +268,13 @@ impl DockerHelper {
                 ("Service".to_string(), self.service_label.clone()),
                 (
                     "ContainerType".to_string(),
-                    HELPER_CONTAINER_TYPE.to_string(),
+                    self.spec.container_type.to_string(),
                 ),
             ])),
             host_config: Some(bollard::plugin::HostConfig {
-                network_mode: Some("host".to_string()),
-                cap_add: Some(vec!["NET_ADMIN".to_string()]),
+                network_mode: Some(self.spec.network_mode.to_string()),
+                pid_mode: self.spec.pid_mode.map(str::to_string),
+                cap_add: Some(self.spec.cap_add.iter().map(ToString::to_string).collect()),
                 auto_remove: Some(true),
                 ..Default::default()
             }),
@@ -268,7 +286,7 @@ impl DockerHelper {
                 .docker
                 .create_container(
                     Some(bollard::query_parameters::CreateContainerOptions {
-                        name: Some(HELPER_CONTAINER_NAME.to_string()),
+                        name: Some(self.spec.name.to_string()),
                         ..Default::default()
                     }),
                     body.clone(),
@@ -286,11 +304,7 @@ impl DockerHelper {
             }
         }
 
-        match self
-            .docker
-            .start_container(HELPER_CONTAINER_NAME, None)
-            .await
-        {
+        match self.docker.start_container(self.spec.name, None).await {
             Ok(())
             | Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 304, ..
@@ -339,7 +353,7 @@ impl DockerHelper {
         let exec = self
             .docker
             .create_exec(
-                HELPER_CONTAINER_NAME,
+                self.spec.name,
                 bollard::exec::CreateExecOptions::<String> {
                     attach_stdin: Some(attach_stdin),
                     attach_stdout: Some(true),
@@ -392,12 +406,32 @@ impl DockerHelper {
         let (write_result, read_result) = tokio::join!(write, collect_exec_output(output));
         let (stdout, stderr) = read_result?;
         if let Err(err) = write_result {
-            tracing::debug!("firewall helper exec stdin write: {err}");
+            tracing::debug!("{} exec stdin write: {err}", self.spec.name);
         }
 
         let exit_code = wait_exec(&self.docker, &exec_id).await?;
 
         exec_result(program, exit_code, stdout, stderr)
+    }
+}
+
+async fn force_remove(docker: &bollard::Docker, id: &str) -> Result<(), anyhow::Error> {
+    match docker
+        .remove_container(
+            id,
+            Some(bollard::query_parameters::RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await
+    {
+        Ok(())
+        | Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404 | 409,
+            ..
+        }) => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 

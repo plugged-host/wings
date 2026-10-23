@@ -562,6 +562,7 @@ impl CollabManager {
         }
 
         let path = root.join(file_name);
+        let key = server.filesystem.diff_key(&path).await;
         if server
             .filesystem
             .async_is_ignored(&path, FileType::File)
@@ -570,11 +571,13 @@ impl CollabManager {
                 .user_permissions
                 .async_is_ignored(server, user_uuid, &path, FileType::File)
                 .await
+            || server
+                .user_permissions
+                .async_is_ignored(server, user_uuid, &key, FileType::File)
+                .await
         {
             return Err(CollabError::User("file not found"));
         }
-
-        let key = server.filesystem.diff_key(&path).await;
 
         Ok((path, key.to_string_lossy().to_compact_string(), filesystem))
     }
@@ -1237,7 +1240,9 @@ impl CollabManager {
 
         if !server
             .filesystem
-            .has_headroom(bytes.len() as i64 - old_content_size)
+            .trash
+            .ensure_headroom(server, bytes.len() as i64 - old_content_size)
+            .await
         {
             return Err(CollabError::User("failed to allocate space"));
         }

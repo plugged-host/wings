@@ -493,8 +493,12 @@ async fn container_helper(
         .and_then(|config| config.image.clone())
         .unwrap_or_else(|| image.clone());
 
-    let helper =
-        runner::DockerHelper::new(Arc::clone(docker), image, config.load().app_name.clone());
+    let helper = runner::DockerHelper::new(
+        Arc::clone(docker),
+        &runner::FIREWALL_HELPER,
+        image,
+        config.load().app_name.clone(),
+    );
     helper.ensure().await?;
 
     let runner = CommandRunner::Docker(helper);

@@ -7,6 +7,7 @@ mod put {
         routes::{ApiError, api::servers::_server_::GetServer},
     };
     use serde::{Deserialize, Serialize};
+    use std::path::Path;
     use utoipa::ToSchema;
 
     fn true_fn() -> bool {
@@ -35,6 +36,7 @@ mod put {
     #[utoipa::path(put, path = "/", responses(
         (status = OK, body = inline(Response)),
         (status = NOT_FOUND, body = ApiError),
+        (status = EXPECTATION_FAILED, body = ApiError),
     ), params(
         (
             "server" = uuid::Uuid,
@@ -61,6 +63,11 @@ mod put {
 
         let mut renamed_count = 0;
         for file in data.files {
+            let raw_from = Path::new(&data.root).join(&file.from);
+            let raw_to = Path::new(&data.root).join(&file.to);
+            super::super::reject_protected(&server, &raw_from).await?;
+            super::super::reject_protected(&server, &raw_to).await?;
+
             let from = root.join(file.from);
             if from == root {
                 continue;

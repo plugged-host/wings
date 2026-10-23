@@ -37,6 +37,7 @@ pub mod listing;
 pub mod operations;
 pub mod pull;
 pub mod sqlite;
+pub mod trash;
 pub mod uploads;
 pub mod usage;
 pub mod virtualfs;
@@ -242,6 +243,8 @@ pub fn encode_mode(mode: u32) -> compact_str::CompactString {
     }
 }
 
+pub const VIRTUAL_PATH_MESSAGE: &str = "path is a mount point or virtual directory";
+
 pub struct Filesystem {
     uuid: uuid::Uuid,
     app_state: crate::routes::State,
@@ -268,10 +271,12 @@ pub struct Filesystem {
     pub last_disk_check: Arc<AtomicU64>,
     pub disk_check_completed: Arc<tokio::sync::Notify>,
     disk_ignored: arc_swap::ArcSwap<IgnoreList>,
+    mount_gateways: arc_swap::ArcSwap<Vec<PathBuf>>,
 
     pub archive_fs_cache: moka::future::Cache<PathBuf, Arc<dyn VirtualReadableFilesystem>>,
     pub operations: operations::OperationManager,
     pub uploads: uploads::UploadManager,
+    pub trash: trash::TrashManager,
 }
 
 impl Filesystem {
@@ -292,8 +297,7 @@ impl Filesystem {
         let disk_usage = Arc::new(RwLock::new(usage::DiskUsage::default()));
         let disk_usage_cached_logical = Arc::new(AtomicU64::new(0));
         let disk_usage_cached_physical = Arc::new(AtomicU64::new(0));
-        let disk_ignored =
-            IgnoreList::from_lines(deny_list.iter()).unwrap_or_else(|_| IgnoreList::empty());
+        let disk_ignored = Self::build_deny_list(deny_list).unwrap_or_else(|_| IgnoreList::empty());
 
         let cap_filesystem = cap::CapFilesystem::new_uninitialized(&base_path);
         let server_notifier = inotify::InotifyServerNotifier::new(
@@ -346,12 +350,40 @@ impl Filesystem {
             last_disk_check,
             disk_check_completed,
             disk_ignored: arc_swap::ArcSwap::from_pointee(disk_ignored),
+            mount_gateways: arc_swap::ArcSwap::from_pointee(Vec::new()),
 
             archive_fs_cache: moka::future::CacheBuilder::new(8)
                 .time_to_idle(std::time::Duration::from_mins(1))
                 .build(),
             operations: operations::OperationManager::new(sender.clone(), Arc::clone(&config)),
             uploads: uploads::UploadManager::new(sender),
+            trash: trash::TrashManager::default(),
+        }
+    }
+
+    /// The egg deny-list with the trash directory appended last, so no egg rule can
+    /// re-include it.
+    fn build_deny_list(deny_list: &[impl AsRef<str>]) -> Result<IgnoreList, ignore::Error> {
+        let trash_line = trash::ignore_line();
+
+        IgnoreList::from_lines(
+            deny_list
+                .iter()
+                .map(AsRef::as_ref)
+                .chain([trash_line.as_str()]),
+        )
+    }
+
+    pub async fn ensure_trash_directory(&self) {
+        if let Err(err) = self
+            .async_create_chowned_dir_all(trash::TRASH_DIRECTORY)
+            .await
+        {
+            tracing::warn!(
+                path = %self.base_path.display(),
+                "failed to create trash directory: {}",
+                err
+            );
         }
     }
 
@@ -376,8 +408,75 @@ impl Filesystem {
         self.use_server_notifier.load(Ordering::Relaxed) && self.server_notifier.is_trusted()
     }
 
+    /// Remembers the container-relative mount targets so the mount points and the
+    /// virtual directories leading to them cannot be replaced or removed.
+    pub fn update_mounts(&self, mounts: &[crate::server::configuration::Mount]) {
+        let gateways = mounts
+            .iter()
+            .filter_map(|mount| mount.container_relative_target())
+            .map(|target| cap::CapFilesystem::resolve_path(Path::new(target)))
+            .collect();
+
+        self.mount_gateways.store(Arc::new(gateways));
+    }
+
+    /// A mount point itself, or a directory that only exists to lead to one.
+    pub fn is_mount_gateway(&self, path: &Path) -> bool {
+        let gateways = self.mount_gateways.load();
+        if gateways.is_empty() {
+            return false;
+        }
+
+        let path = self.relative_path_cow(path);
+        if path.as_os_str().is_empty() {
+            return false;
+        }
+
+        gateways.iter().any(|gateway| gateway.starts_with(&*path))
+    }
+
+    fn is_backups_virtual(&self, path: &Path) -> bool {
+        let config = self.config.load();
+        if !config.system.backups.mounting.enabled {
+            return false;
+        }
+
+        let path = self.relative_path_cow(path);
+        if path.as_os_str().is_empty() {
+            return false;
+        }
+
+        path.starts_with(&config.system.backups.mounting.path)
+    }
+
+    /// Whether writing an entry of `file_type` at `path` would clobber a virtual
+    /// entry: anything under the backup browsing directory, or a non-directory where
+    /// a mount point or one of its parents belongs. Directories stay allowed there,
+    /// which is what the container runtime creates itself.
+    pub fn is_virtual_write_target(&self, path: &Path, file_type: cap::FileType) -> bool {
+        self.is_backups_virtual(path) || (!file_type.is_dir() && self.is_mount_gateway(path))
+    }
+
+    /// Whether `path` may not be removed, renamed or replaced at all, also when it is
+    /// a directory. Resolves the parent chain so a symlink cannot reach around it.
+    pub async fn async_is_protected_path(&self, path: &Path) -> bool {
+        if self.is_backups_virtual(path) || self.is_mount_gateway(path) {
+            return true;
+        }
+
+        if self.mount_gateways.load().is_empty() {
+            return false;
+        }
+
+        self.is_mount_gateway(&self.diff_key(path).await)
+    }
+
+    fn virtual_path_error() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, VIRTUAL_PATH_MESSAGE)
+    }
+
     pub async fn update_ignored(&self, deny_list: &[impl AsRef<str>]) {
-        if let Ok(disk_ignored) = IgnoreList::from_lines(deny_list.iter()) {
+        if let Ok(disk_ignored) = Self::build_deny_list(deny_list) {
             self.disk_ignored.store(Arc::new(disk_ignored));
         }
     }
@@ -410,6 +509,13 @@ impl Filesystem {
 
         IsIgnoredFn::new(
             move |file_type, path: PathBuf| {
+                if sync_server
+                    .filesystem
+                    .is_virtual_write_target(&path, file_type)
+                {
+                    return IgnoreVerdict::Skip;
+                }
+
                 let matcher = sync_server.filesystem.disk_ignored.load();
                 if matcher.is_empty() {
                     return IgnoreVerdict::Keep(path);
@@ -423,6 +529,10 @@ impl Filesystem {
                 let server = async_server.clone();
 
                 async move {
+                    if server.filesystem.is_virtual_write_target(&path, file_type) {
+                        return IgnoreVerdict::Skip;
+                    }
+
                     let matcher = server.filesystem.disk_ignored.load();
                     if matcher.is_empty() {
                         return IgnoreVerdict::Keep(path);
@@ -474,6 +584,10 @@ impl Filesystem {
     }
 
     pub fn is_ignored(&self, path: &Path, file_type: cap::FileType) -> bool {
+        if self.is_virtual_write_target(path, file_type) {
+            return true;
+        }
+
         let disk_ignored = self.disk_ignored.load();
         if disk_ignored.is_empty() {
             return false;
@@ -483,6 +597,10 @@ impl Filesystem {
     }
 
     pub async fn async_is_ignored(&self, path: &Path, file_type: cap::FileType) -> bool {
+        if self.is_virtual_write_target(path, file_type) {
+            return true;
+        }
+
         if self.disk_ignored.load().is_empty() {
             return false;
         }
@@ -496,6 +614,10 @@ impl Filesystem {
     /// excludes while re-including something beneath it, so that a re-included
     /// entry can still be created or reached through it.
     pub async fn async_is_ignored_subtree(&self, path: &Path, file_type: cap::FileType) -> bool {
+        if self.is_virtual_write_target(path, file_type) {
+            return true;
+        }
+
         if self.disk_ignored.load().is_empty() {
             return false;
         }
@@ -832,12 +954,9 @@ impl Filesystem {
             let mut infos = Vec::new();
 
             for mount in &server_config.mounts {
-                let Some(relative_target) = mount.target.strip_prefix("/home/container/") else {
+                let Some(relative_target) = mount.container_relative_target() else {
                     continue;
                 };
-                if relative_target.is_empty() {
-                    continue;
-                }
                 let Ok(source_path) = mount.resolve_allowed_source(&allowed).await else {
                     continue;
                 };
@@ -924,12 +1043,9 @@ impl Filesystem {
 
             let mut result: Option<(PathBuf, PathBuf, bool)> = None;
             for mount in &server_config.mounts {
-                let Some(relative_target) = mount.target.strip_prefix("/home/container/") else {
+                let Some(relative_target) = mount.container_relative_target() else {
                     continue;
                 };
-                if relative_target.is_empty() {
-                    continue;
-                }
 
                 let relative_target_path = Path::new(relative_target);
                 if !path.starts_with(relative_target_path) {
@@ -989,8 +1105,26 @@ impl Filesystem {
         (path, Arc::new(fs))
     }
 
+    /// The primary filesystem without ignore rules or disk quota, for restoring a
+    /// server's files exactly as they were sent.
+    pub fn transfer_writable_fs(
+        &self,
+        server: &crate::server::Server,
+    ) -> Arc<dyn virtualfs::VirtualWritableFilesystem> {
+        let mut fs = self.cap_filesystem.get_virtual(server.clone());
+        fs.is_primary_server_fs = true;
+        fs.is_writable = true;
+        fs.ignore_quota = true;
+
+        Arc::new(fs)
+    }
+
     pub async fn truncate_path(&self, path: impl AsRef<Path>) -> Result<(), anyhow::Error> {
         let path = self.relative_path(path.as_ref());
+
+        if self.async_is_protected_path(&path).await {
+            return Err(Self::virtual_path_error().into());
+        }
 
         let metadata = self.async_symlink_metadata(&path).await?;
 
@@ -1033,6 +1167,10 @@ impl Filesystem {
             ));
         }
 
+        if self.async_is_protected_path(&path).await {
+            return Err(Self::virtual_path_error());
+        }
+
         self.async_remove_dir(&path).await?;
 
         let mut disk_usage = self.disk_usage.write().await;
@@ -1058,6 +1196,12 @@ impl Filesystem {
     ) -> Result<(), anyhow::Error> {
         let old_path = self.relative_path(old_path.as_ref());
         let new_path = self.relative_path(new_path.as_ref());
+
+        if self.async_is_protected_path(&old_path).await
+            || self.async_is_protected_path(&new_path).await
+        {
+            return Err(Self::virtual_path_error().into());
+        }
 
         if parents == RenameParents::Create
             && let Some(parent) = new_path.parent()
@@ -1455,6 +1599,8 @@ impl Filesystem {
         self.disk_usage_cached_physical.store(0, Ordering::Relaxed);
         self.resource_usage.publish_disk_usage(0);
 
+        self.trash.clear().await;
+
         let threads = self.config.load().api.file_delete_threads;
         self.async_remove_dir_all(Path::new(""), threads).await
     }
@@ -1770,6 +1916,9 @@ impl Filesystem {
 
         self.cap_filesystem.inner.store(Some(Arc::new(dir)));
 
+        self.ensure_trash_directory().await;
+        self.trash.load(&self.cap_filesystem).await;
+
         if self.app_state.config.load().system.disk_check_use_inotify {
             tokio::spawn({
                 let state = self.app_state.clone();
@@ -1800,6 +1949,7 @@ impl Filesystem {
 
     pub async fn destroy(&self) {
         self.disk_checker.abort();
+        self.trash.abort_purge_task();
         self.app_state
             .inotify_manager
             .unregister_server(self.uuid)
@@ -2439,6 +2589,119 @@ mod tests {
         opened?;
         assert_eq!(opens.load(Ordering::Relaxed), 1);
         Ok(())
+    }
+
+    fn mount(target: &str) -> crate::server::configuration::Mount {
+        crate::server::configuration::Mount {
+            default: false,
+            target: target.into(),
+            source: "/mnt/allowed/source".into(),
+            read_only: false,
+        }
+    }
+
+    // Filesystem
+    #[test]
+    fn mount_points_and_virtual_parents_cannot_be_removed_or_renamed() {
+        crate::server::Server::with_mock(|server| async move {
+            let root = server.filesystem.base_path.to_path_buf();
+            std::fs::create_dir_all(root.join("mods")).unwrap();
+            std::fs::write(root.join("mods/a.jar"), b"x").unwrap();
+            std::fs::write(root.join("x.txt"), b"x").unwrap();
+
+            server.filesystem.update_mounts(&[
+                mount("/home/container/mods"),
+                mount("/home/container/plugins/data"),
+            ]);
+
+            for path in ["mods", "plugins", "plugins/data"] {
+                assert!(
+                    server.filesystem.is_mount_gateway(Path::new(path)),
+                    "{path}"
+                );
+                assert!(
+                    server
+                        .filesystem
+                        .async_is_protected_path(Path::new(path))
+                        .await,
+                    "{path}"
+                );
+                assert!(
+                    server
+                        .filesystem
+                        .is_ignored(Path::new(path), FileType::File),
+                    "{path}"
+                );
+                assert!(
+                    !server.filesystem.is_ignored(Path::new(path), FileType::Dir),
+                    "{path}"
+                );
+            }
+            assert!(!server.filesystem.is_mount_gateway(Path::new("mods/a.jar")));
+            assert!(!server.filesystem.is_mount_gateway(Path::new("")));
+
+            assert!(server.filesystem.truncate_path("mods").await.is_err());
+            assert!(server.filesystem.remove_empty_dir("plugins").await.is_err());
+            assert!(
+                server
+                    .filesystem
+                    .rename_path("mods", "mods2", RenameParents::Require)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                server
+                    .filesystem
+                    .rename_path("x.txt", "plugins", RenameParents::Require)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                server
+                    .filesystem
+                    .trash
+                    .trash(&server, Path::new("mods"), trash::TrashSource::Api)
+                    .await
+                    .is_err()
+            );
+            assert!(root.join("mods/a.jar").is_file());
+            assert!(root.join("x.txt").is_file());
+
+            assert!(server.filesystem.truncate_path("mods/a.jar").await.is_ok());
+
+            server.filesystem.update_mounts(&[]);
+            assert!(!server.filesystem.is_mount_gateway(Path::new("mods")));
+            assert!(server.filesystem.truncate_path("mods").await.is_ok());
+        });
+    }
+
+    #[test]
+    fn backup_browsing_directory_is_never_a_write_target() {
+        crate::server::Server::with_mock(|server| async move {
+            assert!(
+                server
+                    .filesystem
+                    .is_ignored(Path::new(".backups"), FileType::Dir)
+            );
+            assert!(
+                server
+                    .filesystem
+                    .is_ignored(Path::new(".backups/abc/world"), FileType::File)
+            );
+            assert!(
+                server
+                    .filesystem
+                    .async_is_protected_path(Path::new(".backups/abc"))
+                    .await
+            );
+            assert!(
+                server
+                    .filesystem
+                    .rename_path("missing", ".backups/x", RenameParents::Create)
+                    .await
+                    .is_err()
+            );
+        });
     }
 
     #[test]

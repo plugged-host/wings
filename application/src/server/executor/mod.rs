@@ -89,4 +89,6 @@ pub trait ServerExecutor: Send + Sync {
         &self,
         ips: &[IpAddr],
     ) -> Result<HashMap<IpAddr, Vec<UsedPort>>, anyhow::Error>;
+
+    fn bandwidth(&self) -> Option<&super::bandwidth::Bandwidth>;
 }

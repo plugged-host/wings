@@ -103,13 +103,25 @@ pub enum AuthenticationType {
     PublicKey,
 }
 
+#[derive(Deserialize)]
+pub struct SftpAuth {
+    pub user: uuid::Uuid,
+    pub server: uuid::Uuid,
+
+    pub permissions: Permissions,
+    #[serde(default)]
+    pub ignored_files: Vec<String>,
+
+    pub as_of: Option<i64>,
+}
+
 pub async fn get_sftp_auth(
     client: &Client,
     r#type: AuthenticationType,
     username: &str,
     password: &str,
-) -> Result<(uuid::Uuid, uuid::Uuid, Permissions, Vec<String>), anyhow::Error> {
-    let response: Response = into_json(
+) -> Result<SftpAuth, anyhow::Error> {
+    into_json(
         client
             .client
             .post(format!("{}/sftp/auth", client.url))
@@ -124,24 +136,46 @@ pub async fn get_sftp_auth(
             .await?
             .text()
             .await?,
-    )?;
+    )
+}
 
-    #[derive(Deserialize)]
-    pub struct Response {
-        user: uuid::Uuid,
-        server: uuid::Uuid,
+#[derive(Deserialize)]
+pub struct UserServerPermissions {
+    pub user: uuid::Uuid,
+    pub server: uuid::Uuid,
 
-        permissions: Permissions,
-        #[serde(default)]
-        ignored_files: Vec<String>,
-    }
+    pub permissions: Option<Permissions>,
+    #[serde(default)]
+    pub ignored_files: Vec<String>,
+}
 
-    Ok((
-        response.user,
-        response.server,
-        response.permissions,
-        response.ignored_files,
-    ))
+#[derive(Deserialize)]
+pub struct PermissionsBatch {
+    pub as_of: i64,
+    pub entries: Vec<UserServerPermissions>,
+}
+
+pub async fn get_permissions(
+    client: &Client,
+    entries: &[(uuid::Uuid, uuid::Uuid)],
+) -> Result<PermissionsBatch, anyhow::Error> {
+    into_json(
+        client
+            .client
+            .post(format!("{}/permissions", client.url))
+            .json(&json!({
+                "entries": entries
+                    .iter()
+                    .map(|(server, user)| json!({ "server": server, "user": user }))
+                    .collect::<Vec<_>>(),
+            }))
+            .send()
+            .await?
+            .error_for_remote_status()
+            .await?
+            .text()
+            .await?,
+    )
 }
 
 pub async fn send_activity(

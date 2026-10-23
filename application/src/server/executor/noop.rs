@@ -96,4 +96,8 @@ impl ServerExecutor for NoopExecutor {
     {
         Ok(ips.iter().map(|ip| (*ip, Vec::new())).collect())
     }
+
+    fn bandwidth(&self) -> Option<&crate::server::bandwidth::Bandwidth> {
+        None
+    }
 }

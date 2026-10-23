@@ -51,6 +51,10 @@ type ResticBackupCache =
 static RESTIC_BACKUP_CACHE: LazyLock<ResticBackupCache> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
+type RepositoryLocks = moka::future::Cache<CompactString, Arc<RwLock<()>>>;
+static REPOSITORY_LOCKS: LazyLock<RepositoryLocks> =
+    LazyLock::new(|| moka::future::Cache::new(10240));
+
 const RESTIC_STDERR_CAPTURE_LIMIT: usize = 8 * 1024;
 const MAX_TREE_DEPTH: usize = 1024;
 const MAX_BROWSE_ENTRIES: usize = 10_000_000;
@@ -305,6 +309,18 @@ impl ResticBackup {
         configuration: &ResticBackupConfiguration,
     ) -> Command {
         Self::std_command(config, configuration).into()
+    }
+
+    // restic's own lock acquisition fails both sides when an exclusive and a shared lock
+    // are requested at the same time, so operations on one repository are ordered here,
+    // shared for backups and stats, exclusive for forget and prune
+    pub async fn repository_lock(configuration: &ResticBackupConfiguration) -> Arc<RwLock<()>> {
+        REPOSITORY_LOCKS
+            .get_with(
+                configuration.repository.trim_end_matches('/').into(),
+                async { Arc::new(RwLock::new(())) },
+            )
+            .await
     }
 
     pub fn is_lock_error(status: std::process::ExitStatus, stderr: &str) -> bool {
@@ -749,6 +765,8 @@ impl BackupCreateExt for ResticBackup {
             )
         };
 
+        let repository_lock = Self::repository_lock(&configuration).await;
+        let repository_guard = repository_lock.read().await;
         let mut retried = false;
         let (snapshot_id, total_bytes_processed, total_files_processed) = loop {
             let mut child = Self::command(&server.app_state.config, &configuration)
@@ -838,6 +856,7 @@ impl BackupCreateExt for ResticBackup {
 
             break (snapshot_id, total_bytes_processed, total_files_processed);
         };
+        drop(repository_guard);
 
         if let Some(snapshot_id) = &snapshot_id {
             let mut cache = RESTIC_BACKUP_CACHE.write().await;
@@ -916,6 +935,8 @@ impl BackupStreamCreateExt for ResticBackup {
             )
         };
 
+        let repository_lock = Self::repository_lock(&configuration).await;
+        let repository_guard = repository_lock.read().await;
         let mut retried = false;
         let (snapshot_id, total_bytes_processed) = loop {
             let mut child = Self::command(&state.config, &configuration)
@@ -1019,6 +1040,7 @@ impl BackupStreamCreateExt for ResticBackup {
 
             break (snapshot_id, total_bytes_processed);
         };
+        drop(repository_guard);
 
         let Some(snapshot_id) = snapshot_id else {
             return Err(anyhow::anyhow!(
@@ -1410,7 +1432,7 @@ impl BackupExt for ResticBackup {
                 progress.increment_bytes(size);
                 progress.increment_files();
 
-                server.log_daemon(compact_str::format_compact!("(restoring): {}", item));
+                super::log_restoring(server, Path::new(item));
             }
         }
 
@@ -1432,6 +1454,8 @@ impl BackupExt for ResticBackup {
     }
 
     async fn delete(&self, state: &crate::routes::State) -> Result<(), anyhow::Error> {
+        let repository_lock = ResticBackup::repository_lock(&self.configuration).await;
+        let repository_guard = repository_lock.write().await;
         let mut retried = false;
         loop {
             let output = ResticBackup::command(&self.config, &self.configuration)
@@ -1467,6 +1491,7 @@ impl BackupExt for ResticBackup {
                 stderr
             ));
         }
+        drop(repository_guard);
 
         let mut cache = RESTIC_BACKUP_CACHE.write().await;
         cache.remove(&self.uuid);

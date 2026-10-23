@@ -39,7 +39,9 @@ mod post {
         response::{ApiResponse, ApiResponseResult},
         routes::{
             GetState,
-            api::system::restic::{execute_restic_command, system_restic_configuration},
+            api::system::restic::{
+                RepositoryLock, execute_restic_command, system_restic_configuration,
+            },
         },
     };
     use axum::http::StatusCode;
@@ -103,8 +105,14 @@ mod post {
         };
 
         if data.foreground {
-            let result =
-                execute_restic_command(&state.config, &configuration, args, "unlock").await;
+            let result = execute_restic_command(
+                &state.config,
+                &configuration,
+                RepositoryLock::None,
+                args,
+                "unlock",
+            )
+            .await;
 
             *super::RESTIC_UNLOCK_CACHE.write().await = Some(result.clone());
             *super::RESTIC_UNLOCK_RUNNING.write().await = false;
@@ -112,8 +120,14 @@ mod post {
             ApiResponse::new_serialized(Response { result }).ok()
         } else {
             tokio::spawn(async move {
-                let result =
-                    execute_restic_command(&state.config, &configuration, args, "unlock").await;
+                let result = execute_restic_command(
+                    &state.config,
+                    &configuration,
+                    RepositoryLock::None,
+                    args,
+                    "unlock",
+                )
+                .await;
 
                 *super::RESTIC_UNLOCK_CACHE.write().await = Some(result);
                 *super::RESTIC_UNLOCK_RUNNING.write().await = false;

@@ -1,4 +1,10 @@
 use super::State;
+use crate::{
+    response::ApiResponse,
+    server::{Server, filesystem::VIRTUAL_PATH_MESSAGE},
+};
+use axum::http::StatusCode;
+use std::path::Path;
 use utoipa_axum::router::OpenApiRouter;
 
 mod chmod;
@@ -13,6 +19,7 @@ mod decompress;
 mod delete;
 mod directory_sizes;
 mod fingerprints;
+mod ignore_matches;
 mod largest_directories;
 mod lines;
 mod list;
@@ -24,7 +31,18 @@ mod revisions;
 mod search;
 mod sqlite_query;
 mod stat;
+mod trash;
 mod write;
+
+async fn reject_protected(server: &Server, path: &Path) -> Result<(), ApiResponse> {
+    if server.filesystem.async_is_protected_path(path).await {
+        return Err(
+            ApiResponse::error(VIRTUAL_PATH_MESSAGE).with_status(StatusCode::EXPECTATION_FAILED)
+        );
+    }
+
+    Ok(())
+}
 
 pub fn router(state: &State) -> OpenApiRouter<State> {
     OpenApiRouter::new()
@@ -44,6 +62,7 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
         .nest("/directory-sizes", directory_sizes::router(state))
         .nest("/chmod", chmod::router(state))
         .nest("/search", search::router(state))
+        .nest("/ignore-matches", ignore_matches::router(state))
         .nest("/sqlite-query", sqlite_query::router(state))
         .nest("/stat", stat::router(state))
         .nest("/fingerprints", fingerprints::router(state))
@@ -52,5 +71,6 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
         .nest("/decompress", decompress::router(state))
         .nest("/operations", operations::router(state))
         .nest("/revisions", revisions::router(state))
+        .nest("/trash", trash::router(state))
         .with_state(state.clone())
 }

@@ -10,6 +10,10 @@ services:
     dns:
       - 1.1.1.1
       - 1.0.0.1
+    # host pid lets wings reach server containers' network namespaces (bandwidth limits),
+    # host cgroup lets it resolve their cgroups for resource stats and cfs burst
+    pid: host
+    cgroup: host
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "/var/lib/docker/containers/:/var/lib/docker/containers/"

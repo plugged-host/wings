@@ -1,12 +1,12 @@
 [package]
 name = "wings-rs"
 rust-version = { workspace = true }
-version = "1.2.6"
+version = "1.2.7"
 edition = "2024"
 
 [dependencies]
 tempfile = "3.27.0"
-unrar = { path = "../unrar-rs" }
+unrar = { package = "unrar-ng", git = "https://github.com/0x7d8/unrar.rs.git" }
 pbs-client = { path = "../pbs-client" }
 tundra-common = { git = "https://github.com/calagopus/tundra.git" }
 tracing = { version = "0.1.41", features = ["max_level_debug"] }
@@ -30,7 +30,7 @@ colored = "3.0.0"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 nestify = "0.3.3"
 rayon = "1.10.0"
-serde_norway = "0.9.42"
+serde-saphyr = { version = "2.0.0", default-features = false, features = ["deserialize", "serialize"] }
 serde_default = "0.2.0"
 tokio-util = { version = "0.7.15", features = ["io-util"] }
 uuid = { workspace = true }
@@ -41,7 +41,7 @@ sevenz-rust2 = { version = "0.24.0", features = ["deflate", "compress", "brotli"
 flate2 = { version = "1.1.1", default-features = false, features = ["zlib-ng"] }
 sha2 = { workspace = true }
 hmac = "0.13.0"
-ddup-bak = "0.11.0"
+ddup-bak = "0.12.0"
 infer = "0.22.0"
 rustls = { workspace = true }
 bytes = { workspace = true }
@@ -67,7 +67,7 @@ new_mime_guess = "4.0.4"
 async-trait = "0.1.88"
 chrono-tz = "0.10.4"
 gzp = { version = "2.0.0", default-features = false, features = ["deflate_zlib_ng"] }
-lzma-rust2 = { version = "0.22.0", features = ["optimization"] }
+lzma-rust2 = { version = "0.23.0", features = ["optimization"] }
 bzip2 = "0.6.0"
 zstd = { workspace = true }
 base64 = "0.23.0"
@@ -97,20 +97,25 @@ itaf = "0.3.0"
 arc-swap = "1.9.1"
 rusqlite = { version = "0.40.0", features = ["bundled", "column_decltype", "hooks", "limits"] }
 blake3 = "1.8.5"
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 toml_edit = "0.25.12"
 ini-roundtrip = "0.2.1"
 yrs = "0.28.0"
 croner = { version = "4.0.0", features = ["serde"] }
 rcgen = { version = "0.14.8", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
 time = "0.3.55"
+semver = "1.0.28"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
 tikv-jemallocator = "0.6.0"
 ktls = { version = "6.0.2", git = "https://github.com/KnorpelSenf/ktls.git", rev = "047f134ce25380087a55d6bfbfd2f14d839c0ba0", features = ["aws_lc_rs"] }
 tokio-rustls = "0.26.4"
 netlink-packet-core = "0.9.0"
 netlink-packet-route = "0.33.0"
+
+[target.'cfg(windows)'.dependencies]
+self-replace = "1.5.0"
 
 [target.'cfg(target_arch = "riscv64gc")'.dependencies]
 libz-ng-sys = "=1.1.23" # temporary pin due to riscv64 issues

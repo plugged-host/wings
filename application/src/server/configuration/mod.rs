@@ -12,6 +12,8 @@ use utoipa::ToSchema;
 pub mod process;
 pub mod seccomp;
 
+pub const CONTAINER_ROOT: &str = "/home/container";
+
 fn is_plain_absolute_path(path: &Path) -> bool {
     path.is_absolute()
         && !path.components().any(|component| {
@@ -129,6 +131,14 @@ impl AllowedMounts {
 }
 
 impl Mount {
+    /// The target relative to [`CONTAINER_ROOT`], unless it lies outside or is the root.
+    pub fn container_relative_target(&self) -> Option<&str> {
+        self.target
+            .strip_prefix(CONTAINER_ROOT)?
+            .strip_prefix('/')
+            .filter(|target| !target.is_empty())
+    }
+
     pub async fn resolve_allowed_source(
         &self,
         allowed: &AllowedMounts,
@@ -414,6 +424,13 @@ nestify::nest! {
                 pub cooldown: u64,
             }>,
         },
+
+        #[serde(default)]
+        #[schema(inline)]
+        pub trash: Option<#[derive(ToSchema, Deserialize, Serialize, Clone, Copy)] pub struct ServerConfigurationTrash {
+            pub retention: u64,
+            pub usage_threshold: Option<u64>,
+        }>,
     }
 }
 
@@ -524,6 +541,7 @@ impl ServerConfiguration {
             },
             auto_start_behavior: crate::models::ServerAutoStartBehavior::default(),
             features: ServerConfigurationFeatures::default(),
+            trash: None,
         }
     }
 
@@ -610,7 +628,7 @@ impl ServerConfiguration {
 
         mounts.push(Mount {
             default: true,
-            target: "/home/container".into(),
+            target: CONTAINER_ROOT.into(),
             source: filesystem
                 .get_base_fs_mount_path()
                 .await

@@ -642,13 +642,23 @@ impl DockerServerConfigurationExt for crate::server::configuration::ServerConfig
                 network_mode: Some(network_mode),
                 dns: Some(config.load().docker.network.dns.clone()),
                 dns_options: Some(config.load().docker.network.dns_options.clone()),
-                tmpfs: Some(HashMap::from([(
-                    "/tmp".to_string(),
-                    format!(
-                        "rw,exec,nosuid,size={}M",
-                        config.load().docker.tmpfs_size.as_mib()
+                tmpfs: Some(HashMap::from([
+                    (
+                        "/tmp".to_string(),
+                        format!(
+                            "rw,exec,nosuid,size={}M",
+                            config.load().docker.tmpfs_size.as_mib()
+                        ),
                     ),
-                )])),
+                    (
+                        format!(
+                            "{}/{}",
+                            crate::server::configuration::CONTAINER_ROOT,
+                            crate::server::filesystem::trash::TRASH_DIRECTORY
+                        ),
+                        TRASH_TMPFS_OPTIONS.to_string(),
+                    ),
+                ])),
                 log_config: Some(bollard::plugin::HostConfigLogConfig {
                     typ: Some(config.load().docker.log_config.r#type.clone()),
                     config: Some(
@@ -755,6 +765,9 @@ impl DockerServerConfigurationExt for crate::server::configuration::ServerConfig
         resources
     }
 }
+
+/// An empty read-only mount hiding the host-side trash directory from the container.
+const TRASH_TMPFS_OPTIONS: &str = "ro,nosuid,nodev,noexec,size=4k";
 
 const TRANSIENT_JSON_ATTEMPTS: u32 = 4;
 const TRANSIENT_JSON_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
@@ -936,6 +949,7 @@ pub struct DockerExecutor {
     docker: Arc<bollard::Docker>,
     app_config: Arc<crate::config::Config>,
     firewall: Arc<dyn crate::server::firewall::FirewallBackend>,
+    bandwidth: Arc<crate::server::bandwidth::Bandwidth>,
     stats_sampler: Arc<cgroup::StatsSampler>,
     host_mounts: OnceLock<Option<host_mounts::HostMountTable>>,
     host_gateway: OnceLock<Option<std::net::IpAddr>>,
@@ -946,11 +960,13 @@ impl DockerExecutor {
         docker: Arc<bollard::Docker>,
         app_config: Arc<crate::config::Config>,
         firewall: Arc<dyn crate::server::firewall::FirewallBackend>,
+        bandwidth: Arc<crate::server::bandwidth::Bandwidth>,
     ) -> Self {
         Self {
             docker,
             app_config,
             firewall,
+            bandwidth,
             stats_sampler: Arc::new(cgroup::StatsSampler::default()),
             host_mounts: OnceLock::new(),
             host_gateway: OnceLock::new(),
@@ -1077,10 +1093,19 @@ impl DockerExecutor {
             network_mode: Some(config.docker.network.mode.clone()),
             dns: Some(config.docker.network.dns.clone()),
             dns_options: Some(config.docker.network.dns_options.clone()),
-            tmpfs: Some(HashMap::from([(
-                "/tmp".to_string(),
-                format!("rw,exec,nosuid,size={}M", config.docker.tmpfs_size.as_mib()),
-            )])),
+            tmpfs: Some(HashMap::from([
+                (
+                    "/tmp".to_string(),
+                    format!("rw,exec,nosuid,size={}M", config.docker.tmpfs_size.as_mib()),
+                ),
+                (
+                    format!(
+                        "/mnt/server/{}",
+                        crate::server::filesystem::trash::TRASH_DIRECTORY
+                    ),
+                    TRASH_TMPFS_OPTIONS.to_string(),
+                ),
+            ])),
             log_config: Some(bollard::plugin::HostConfigLogConfig {
                 typ: Some(config.docker.log_config.r#type.clone()),
                 config: Some(
@@ -1495,7 +1520,7 @@ struct DockerProcessHandle {
 
     resource_usage: tokio::sync::watch::Sender<super::super::resources::ResourceUsage>,
     publish_resource_usage: bool,
-    shape_bandwidth: bool,
+    bandwidth: Option<Arc<crate::server::bandwidth::Bandwidth>>,
     cfs_lock: Arc<tokio::sync::Mutex<()>>,
     boosted_limit_percent: Arc<AtomicU32>,
     stdin_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -1519,7 +1544,7 @@ impl DockerProcessHandle {
         status_tx: tokio::sync::mpsc::Sender<super::ProcessStatus>,
         publish_resource_usage: bool,
         attach_stdin: bool,
-        shape_bandwidth: bool,
+        bandwidth: Option<Arc<crate::server::bandwidth::Bandwidth>>,
     ) -> Result<Self, anyhow::Error> {
         let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(150);
         let (stdout_ratelimited_tx, stdout_ratelimited_rx) =
@@ -1661,6 +1686,7 @@ impl DockerProcessHandle {
             }
 
             let mut source = StatsSource::Unresolved;
+            let mut cgroup_sampled = false;
             let mut prev_cpu_total = 0;
             let mut prev_at = None;
 
@@ -1728,6 +1754,8 @@ impl DockerProcessHandle {
                             {
                                 Some(pid) => match cgroup::StatFiles::resolve(pid) {
                                     Some(files) => {
+                                        cgroup_sampled = false;
+
                                         StatsSource::Cgroup(stats_sampler.register(files))
                                     }
                                     None => {
@@ -1751,8 +1779,14 @@ impl DockerProcessHandle {
                 }
 
                 let sample = match received {
-                    Some(Ok(sample)) => sample,
-                    Some(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => {
+                    Some(Ok(sample)) => {
+                        cgroup_sampled = true;
+
+                        sample
+                    }
+                    Some(Err(err))
+                        if err.kind() == std::io::ErrorKind::NotFound && cgroup_sampled =>
+                    {
                         source = StatsSource::Unresolved;
 
                         continue;
@@ -2136,7 +2170,7 @@ impl DockerProcessHandle {
             firewall,
             resource_usage,
             publish_resource_usage,
-            shape_bandwidth,
+            bandwidth,
             cfs_lock,
             boosted_limit_percent,
             stdin_tx,
@@ -2262,14 +2296,14 @@ impl DockerProcessHandle {
 
     async fn apply_bandwidth(
         docker: &bollard::Docker,
-        app_config: &crate::config::Config,
+        bandwidth: &crate::server::bandwidth::Bandwidth,
         container_id: &str,
         server: &super::super::InnerServer,
     ) -> Result<(), anyhow::Error> {
         let _guard = server.bandwidth_lock.lock().await;
         let limits = server.configuration.read().await.build.bandwidth;
 
-        match crate::server::bandwidth::apply(app_config, docker, container_id, limits).await {
+        match bandwidth.apply(docker, container_id, limits).await {
             Err(err) if !limits.is_limited() => {
                 tracing::warn!(server = %server.uuid, "failed to clear bandwidth limits: {err:#}");
 
@@ -2630,10 +2664,9 @@ impl super::ProcessHandle for DockerProcessHandle {
             .apply_cfs_burst(&self.container_id, &self.app_config)
             .await;
 
-        if self.shape_bandwidth
+        if let Some(bandwidth) = &self.bandwidth
             && let Err(err) =
-                Self::apply_bandwidth(&self.docker, &self.app_config, &self.container_id, &server)
-                    .await
+                Self::apply_bandwidth(&self.docker, bandwidth, &self.container_id, &server).await
         {
             tracing::error!(server = %server.uuid, "failed to apply bandwidth limits: {err:#}");
         }
@@ -2645,14 +2678,10 @@ impl super::ProcessHandle for DockerProcessHandle {
         self.start_container().await?;
 
         if let Ok(server) = self.get_server() {
-            if self.shape_bandwidth
-                && let Err(err) = Self::apply_bandwidth(
-                    &self.docker,
-                    &self.app_config,
-                    &self.container_id,
-                    &server,
-                )
-                .await
+            if let Some(bandwidth) = &self.bandwidth
+                && let Err(err) =
+                    Self::apply_bandwidth(&self.docker, bandwidth, &self.container_id, &server)
+                        .await
             {
                 self.kill().await.ok();
                 return Err(err.context("failed to apply bandwidth limits"));
@@ -2930,6 +2959,8 @@ impl super::ServerExecutor for DockerExecutor {
 
         let container_name = self.container_name(server).await;
 
+        server.filesystem.ensure_trash_directory().await;
+
         let bollard_config = server
             .configuration
             .read()
@@ -2966,9 +2997,9 @@ impl super::ServerExecutor for DockerExecutor {
         }
 
         let bandwidth = server.configuration.read().await.build.bandwidth;
-        if self.app_config.load().docker.bandwidth.enabled
-            && bandwidth.is_limited()
-            && let Err(err) = crate::server::bandwidth::ready(&self.app_config).await
+        if bandwidth.is_limited()
+            && self.bandwidth.enabled()
+            && let Err(err) = self.bandwidth.ready().await
         {
             return Err(err.context("failed to apply bandwidth limits"));
         }
@@ -2996,7 +3027,7 @@ impl super::ServerExecutor for DockerExecutor {
                 status_tx,
                 true,
                 true,
-                true,
+                Some(Arc::clone(&self.bandwidth)),
             )
             .await?,
         );
@@ -3031,7 +3062,7 @@ impl super::ServerExecutor for DockerExecutor {
 
         if let Err(err) = DockerProcessHandle::apply_bandwidth(
             &self.docker,
-            &self.app_config,
+            &self.bandwidth,
             &container_id,
             server,
         )
@@ -3052,7 +3083,7 @@ impl super::ServerExecutor for DockerExecutor {
                 status_tx,
                 true,
                 true,
-                true,
+                Some(Arc::clone(&self.bandwidth)),
             )
             .await?,
         );
@@ -3168,6 +3199,8 @@ impl super::ServerExecutor for DockerExecutor {
             )
         })?;
 
+        server.filesystem.ensure_trash_directory().await;
+
         let bollard_config = bollard::plugin::ContainerCreateBody {
             host_config: Some(self.installer_host_config(
                 &server.filesystem.base(),
@@ -3220,7 +3253,7 @@ impl super::ServerExecutor for DockerExecutor {
                 status_tx,
                 true,
                 true,
-                false,
+                None,
             )
             .await?,
         );
@@ -3256,7 +3289,7 @@ impl super::ServerExecutor for DockerExecutor {
                 status_tx,
                 true,
                 true,
-                false,
+                None,
             )
             .await?,
         );
@@ -3332,6 +3365,8 @@ impl super::ServerExecutor for DockerExecutor {
             tokio::fs::set_permissions(&tmp_dir, std::fs::Permissions::from_mode(0o755)).await?;
         }
 
+        server.filesystem.ensure_trash_directory().await;
+
         let bollard_config = bollard::plugin::ContainerCreateBody {
             host_config: Some(self.installer_host_config(
                 &server.filesystem.base(),
@@ -3388,7 +3423,7 @@ impl super::ServerExecutor for DockerExecutor {
                 status_tx,
                 false,
                 false,
-                false,
+                None,
             )
             .await?,
         );
@@ -3613,6 +3648,10 @@ impl super::ServerExecutor for DockerExecutor {
                 (ip, ports)
             })
             .collect())
+    }
+
+    fn bandwidth(&self) -> Option<&crate::server::bandwidth::Bandwidth> {
+        Some(&self.bandwidth)
     }
 }
 

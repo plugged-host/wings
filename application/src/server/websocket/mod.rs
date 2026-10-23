@@ -34,7 +34,11 @@ pub struct WebsocketJwtPayload {
     pub user_name: Option<compact_str::CompactString>,
     pub user_avatar: Option<String>,
     pub server_uuid: uuid::Uuid,
+    /// What this connection may do, narrowed by the credential the token was issued through.
     pub permissions: Permissions,
+    /// The account's grants on the server. Panels that predate it only send `permissions`,
+    /// which then stands in for both.
+    pub full_permissions: Option<Permissions>,
     pub ignored_files: Option<Vec<compact_str::CompactString>>,
 }
 
@@ -310,14 +314,11 @@ impl TargetedWebsocketMessage {
         &self,
         connection_id: &uuid::Uuid,
         user_uuid: &uuid::Uuid,
-        permissions: &Permissions,
+        has_permission: impl Fn(Permission) -> bool,
     ) -> bool {
         (self.user_uuids.is_empty() || self.user_uuids.contains(user_uuid))
             && (self.connection_uuids.is_empty() || self.connection_uuids.contains(connection_id))
-            && self
-                .permissions
-                .iter()
-                .all(|perm| permissions.has_permission(*perm))
+            && self.permissions.iter().all(|perm| has_permission(*perm))
     }
 
     pub fn matches_user(

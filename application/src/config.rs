@@ -117,7 +117,7 @@ fn api_file_fingerprint_threads() -> usize {
     4
 }
 fn api_upload_limit() -> MiB {
-    100u64.into()
+    0u64.into()
 }
 fn api_max_jwt_uses() -> usize {
     5
@@ -420,6 +420,9 @@ fn system_backup_s3_retry_limit() -> u64 {
 fn system_backup_ddup_bak_create_threads() -> usize {
     4
 }
+fn system_backup_ddup_bak_restore_threads() -> usize {
+    4
+}
 
 fn system_backup_restic_repository() -> SystemPath {
     #[cfg(unix)]
@@ -554,9 +557,6 @@ fn docker_numa_memory_binding() -> bool {
 }
 fn docker_cpu_period() -> u64 {
     100000
-}
-fn docker_bandwidth_enabled() -> bool {
-    true
 }
 fn docker_cfs_burst_enabled() -> bool {
     true
@@ -1125,6 +1125,8 @@ nestify::nest! {
                 pub ddup_bak: #[derive(ToSchema, Deserialize, Serialize, DefaultFromSerde)] #[serde(default)] pub struct SystemBackupsDdupBak {
                     #[serde(default = "system_backup_ddup_bak_create_threads")]
                     pub create_threads: usize,
+                    #[serde(default = "system_backup_ddup_bak_restore_threads")]
+                    pub restore_threads: usize,
 
                     #[serde(default)]
                     pub compression_format: #[derive(ToSchema, Clone, Copy, Deserialize, Serialize, Default)] #[serde(rename_all = "snake_case")] pub enum SystemBackupsDdupBakCompressionFormat {
@@ -1258,8 +1260,12 @@ nestify::nest! {
             #[serde(default)]
             #[schema(inline)]
             pub bandwidth: #[derive(Clone, Copy, ToSchema, Deserialize, Serialize, DefaultFromSerde)] #[serde(default)] pub struct DockerBandwidth {
-                #[serde(default = "docker_bandwidth_enabled")]
-                pub enabled: bool,
+                #[serde(default)]
+                pub backend: crate::server::bandwidth::BandwidthBackendKind,
+                /// replaced by `backend`, only read to migrate older configs
+                #[serde(default, skip_serializing)]
+                #[schema(ignore)]
+                pub enabled: Option<bool>,
             },
 
             #[serde(default)]
@@ -1569,6 +1575,8 @@ type ReloadHandle =
 
 const LOG_CHANNEL_LINES: usize = 4096;
 const LEGACY_LIMITS_WARNING: &str = "migrated api.server_remote_download_limit to limits.server_concurrent_pulls, the old key is no longer used";
+const LEGACY_BANDWIDTH_WARNING: &str =
+    "migrated docker.bandwidth.enabled to docker.bandwidth.backend, the old key is no longer used";
 
 fn log_filter(debug: bool) -> Targets {
     let crate_level = if debug {
@@ -1627,12 +1635,13 @@ impl Config {
     ) -> Result<(Arc<Self>, ConfigGuard), anyhow::Error> {
         let file = File::open(path).context(format!("failed to open config file {path}"))?;
         let reader = std::io::BufReader::new(file);
-        let mut inner: InnerConfig = serde_norway::from_reader(reader)
+        let mut inner: InnerConfig = serde_saphyr::from_reader(reader)
             .context(format!("failed to parse config file {path}"))?;
 
         #[cfg(unix)]
         let migrated_tmp_directory = Self::migrate_tmp_directory(&mut inner);
         let migrated_legacy_limits = Self::migrate_legacy_limits(&mut inner);
+        let migrated_legacy_bandwidth = Self::migrate_legacy_bandwidth(&mut inner);
         let (mut inner, env_overrides) = crate::env_overrides::apply_to_config(inner)?;
 
         Self::ensure_directories(&inner)?;
@@ -1706,6 +1715,9 @@ impl Config {
         if migrated_legacy_limits {
             tracing::warn!("{LEGACY_LIMITS_WARNING}");
         }
+        if migrated_legacy_bandwidth {
+            tracing::warn!("{LEGACY_BANDWIDTH_WARNING}");
+        }
 
         for applied in &env_overrides.applied {
             tracing::info!("applied environment override {applied}");
@@ -1760,6 +1772,9 @@ impl Config {
         if Self::migrate_legacy_limits(&mut new) {
             tracing::warn!("{LEGACY_LIMITS_WARNING}");
         }
+        if Self::migrate_legacy_bandwidth(&mut new) {
+            tracing::warn!("{LEGACY_BANDWIDTH_WARNING}");
+        }
         let (new, _) = crate::env_overrides::apply_to_config(new)?;
         Self::validate_inner(&new)?;
         Self::save_to(&self.path, &new)?;
@@ -1809,8 +1824,8 @@ impl Config {
         let file = opts
             .open(path)
             .context(format!("failed to create config file {path}"))?;
-        let writer = std::io::BufWriter::new(file);
-        serde_norway::to_writer(writer, inner)
+        let mut writer = std::io::BufWriter::new(file);
+        serde_saphyr::to_io_writer(&mut writer, inner)
             .context(format!("failed to write config file {path}"))?;
         Ok(())
     }
@@ -2009,6 +2024,20 @@ impl Config {
             cfg.api.disable_remote_download = true;
         } else {
             cfg.limits.server_concurrent_pulls = limit;
+        }
+
+        true
+    }
+
+    /// Moves `docker.bandwidth.enabled` into `docker.bandwidth.backend`, where `false` became
+    /// the `disabled` backend and `true` is the `auto` default.
+    fn migrate_legacy_bandwidth(cfg: &mut InnerConfig) -> bool {
+        let Some(enabled) = cfg.docker.bandwidth.enabled.take() else {
+            return false;
+        };
+
+        if !enabled {
+            cfg.docker.bandwidth.backend = crate::server::bandwidth::BandwidthBackendKind::Disabled;
         }
 
         true
@@ -2548,7 +2577,7 @@ mod tests {
     use super::*;
 
     fn from_yaml(yaml: &str) -> InnerConfig {
-        serde_norway::from_str(yaml).expect("failed to parse config")
+        serde_saphyr::from_str(yaml).expect("failed to parse config")
     }
 
     #[test]
@@ -2610,7 +2639,7 @@ mod tests {
         assert!(!Config::migrate_legacy_limits(&mut cfg));
         assert_eq!(cfg.limits.server_concurrent_pulls, 7);
 
-        let yaml = serde_norway::to_string(&cfg).expect("config should round trip");
+        let yaml = serde_saphyr::to_string(&cfg).expect("config should round trip");
         assert!(!yaml.contains("server_remote_download_limit"));
         let reparsed = from_yaml(&yaml);
         assert_eq!(reparsed.limits.server_concurrent_pulls, 7);

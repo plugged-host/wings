@@ -105,6 +105,7 @@ pub struct VirtualCapFilesystem {
     pub server: crate::server::Server,
     pub is_primary_server_fs: bool,
     pub is_writable: bool,
+    pub ignore_quota: bool,
     pub is_ignored: Option<IsIgnoredFn>,
 }
 
@@ -897,6 +898,11 @@ impl super::VirtualReadableFilesystem for VirtualCapFilesystem {
     fn is_primary_server_fs(&self) -> bool {
         self.is_primary_server_fs
     }
+    fn is_ignored(&self, path: &Path, file_type: FileType) -> bool {
+        self.is_ignored.as_ref().is_some_and(|is_ignored| {
+            matches!(is_ignored(file_type, path.into()), IgnoreVerdict::Skip)
+        })
+    }
     fn is_fast(&self) -> bool {
         true
     }
@@ -1554,6 +1560,19 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
         Ok(())
     }
 
+    fn create_hard_link(
+        &self,
+        original: &(dyn AsRef<Path> + Send + Sync),
+        link: &(dyn AsRef<Path> + Send + Sync),
+    ) -> Result<(), anyhow::Error> {
+        let link = self.check_write(FileType::File, link.as_ref(), false)?;
+        let original = self.check_ignored(FileType::File, original.as_ref())?;
+
+        self.inner.hard_link(original, &self.inner, &link)?;
+
+        Ok(())
+    }
+
     fn create_seekable_file(
         &self,
         path: &(dyn AsRef<Path> + Send + Sync),
@@ -1567,7 +1586,8 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
                 None,
                 None,
                 |file| self.check_opened(&path, file),
-            )?;
+            )?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {
@@ -1591,7 +1611,8 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
                 permissions,
                 modified,
                 |file| self.check_opened(&path, file),
-            )?;
+            )?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {
@@ -1625,7 +1646,8 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
                     move |file| this.check_opened(&path, file)
                 },
             )
-            .await?;
+            .await?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {
@@ -1658,7 +1680,8 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
                     move |file| this.check_opened(&path, file)
                 },
             )
-            .await?;
+            .await?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {
@@ -1678,12 +1701,14 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
         self.check_opened(&path, &file)?;
 
         if self.is_primary_server_fs {
+            self.server.filesystem.chown_file(&file)?;
             let file = crate::server::filesystem::file::ServerFile::new_file(
                 self.server.clone(),
                 &path,
                 file,
                 0,
-            )?;
+            )?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {
@@ -1703,6 +1728,9 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
         let (path, file) = tokio::task::spawn_blocking(move || -> Result<_, anyhow::Error> {
             let file = this.inner.open_with(&path, options)?;
             this.check_opened(&path, &file)?;
+            if this.is_primary_server_fs {
+                this.server.filesystem.chown_file(&file)?;
+            }
 
             Ok((path, file))
         })
@@ -1715,7 +1743,8 @@ impl super::VirtualWritableFilesystem for VirtualCapFilesystem {
                 &path,
                 file,
                 0,
-            )?;
+            )?
+            .ignorant_if(self.ignore_quota);
 
             Ok(Box::new(file))
         } else {

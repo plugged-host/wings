@@ -63,13 +63,12 @@ mod post {
 
         let mut updated_count = 0;
         for file in data.files {
+            let path = Path::new(&data.root).join(&file.file);
+            super::super::reject_protected(&server, &path).await?;
+
             let (source, filesystem) = server
                 .filesystem
-                .resolve_writable_fs_ignoring(
-                    &server,
-                    Path::new(&data.root).join(&file.file),
-                    &ignored,
-                )
+                .resolve_writable_fs_ignoring(&server, &path, &ignored)
                 .await;
             if source.as_os_str().is_empty() || source == Path::new(&data.root) {
                 continue;

@@ -32,12 +32,27 @@ fn build_restic_command(
     command
 }
 
+#[derive(Clone, Copy)]
+enum RepositoryLock {
+    None,
+    Shared,
+    Exclusive,
+}
+
 async fn execute_restic_command(
     config: &crate::config::Config,
     configuration: &ResticBackupConfiguration,
+    lock: RepositoryLock,
     args: impl Fn(&mut Command),
     operation: &'static str,
 ) -> ResticTaskResult {
+    let repository_lock = ResticBackup::repository_lock(configuration).await;
+    let (_shared_guard, _exclusive_guard) = match lock {
+        RepositoryLock::None => (None, None),
+        RepositoryLock::Shared => (Some(repository_lock.read().await), None),
+        RepositoryLock::Exclusive => (None, Some(repository_lock.write().await)),
+    };
+
     let started = chrono::Utc::now();
     let mut retried = false;
     let output = loop {

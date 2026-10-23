@@ -103,7 +103,7 @@ pub struct InnerServer {
 
     pub user_permissions: permissions::UserPermissionsMap,
     pub filesystem: filesystem::Filesystem,
-    pub sqlite_memory: filesystem::sqlite::QueryMemory,
+    pub sqlite_query_semaphore: tokio::sync::Semaphore,
 }
 
 impl Drop for InnerServer {
@@ -256,6 +256,8 @@ impl Server {
             Arc::clone(&app_state.config),
             &configuration.egg.file_denylist,
         );
+        filesystem.trash.update(configuration.trash);
+        filesystem.update_mounts(&configuration.mounts);
 
         let activity = activity::ActivityManager::new(configuration.uuid, &app_state.config);
         let collab = collab::manager::CollabManager::new(
@@ -268,6 +270,7 @@ impl Server {
             &app_state.config,
         )));
 
+        let suspended = configuration.suspended;
         let server = Self(Arc::new(InnerServer {
             uuid: configuration.uuid,
             app_state,
@@ -294,7 +297,7 @@ impl Server {
             incoming_transfer: RwLock::new(None),
             installer: RwLock::new(None),
 
-            suspended: AtomicBool::new(false),
+            suspended: AtomicBool::new(suspended),
             installing: AtomicBool::new(false),
             restoring: AtomicBool::new(false),
             transferring: AtomicBool::new(false),
@@ -308,10 +311,13 @@ impl Server {
 
             user_permissions: permissions::UserPermissionsMap::default(),
             filesystem,
-            sqlite_memory: filesystem::sqlite::QueryMemory::default(),
+            sqlite_query_semaphore: tokio::sync::Semaphore::new(
+                filesystem::sqlite::QUERY_MAX_CONCURRENT,
+            ),
         }));
 
         server.spawn_stats_forwarder();
+        server.spawn_trash_purge_task();
 
         server
     }
@@ -344,6 +350,25 @@ impl Server {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         });
+    }
+
+    fn spawn_trash_purge_task(&self) {
+        let weak = Arc::downgrade(&self.0);
+
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(filesystem::trash::PURGE_INTERVAL).await;
+
+                let Some(server) = weak.upgrade() else {
+                    break;
+                };
+                let server = Self(server);
+
+                server.filesystem.trash.run_maintenance(&server).await;
+            }
+        });
+
+        self.filesystem.trash.set_purge_task(task.abort_handle());
     }
 
     #[cfg(test)]
@@ -515,9 +540,9 @@ impl Server {
                         server.filesystem.disk_checker_state_dirty.store(true, Ordering::Relaxed);
                     }
 
-                    if server.filesystem.is_full().await
-                        && server.state.get_state() != state::ServerState::Offline
+                    if server.state.get_state() != state::ServerState::Offline
                         && !server.stopping.load(Ordering::SeqCst)
+                        && !server.filesystem.trash.ensure_not_full(&server).await
                     {
                         if full_since.is_none_or(|since| {
                             since.elapsed() < std::time::Duration::from_secs(5)
@@ -843,6 +868,8 @@ impl Server {
         self.filesystem
             .update_ignored(&configuration.egg.file_denylist)
             .await;
+        self.filesystem.trash.update(configuration.trash);
+        self.filesystem.update_mounts(&configuration.mounts);
         self.set_suspended(configuration.suspended).await;
         {
             let mut configuration_lock = self.configuration.write().await;
@@ -1273,6 +1300,12 @@ impl Server {
                             }
                         }
 
+                        if server.suspended.load(Ordering::Relaxed) {
+                            return Err(anyhow::anyhow!(
+                                "Server is in a locked state (suspended), cannot start the server."
+                            ));
+                        }
+
                         if !server.filesystem.disk_checker_state_dirty.load(std::sync::atomic::Ordering::Relaxed) {
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
@@ -1300,7 +1333,7 @@ impl Server {
                             }
                         }
 
-                        if server.filesystem.is_full().await {
+                        if !server.filesystem.trash.ensure_not_full(&server).await {
                             return Err(anyhow::anyhow!(
                                 "Disk space is full, cannot start the server."
                             ));

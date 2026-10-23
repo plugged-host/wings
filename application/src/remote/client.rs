@@ -1,6 +1,6 @@
 use crate::server::{
     activity::ApiActivity, backup::adapters::BackupAdapter, installation::InstallationScript,
-    permissions::Permissions, schedule::ApiScheduleCompletionStatus,
+    schedule::ApiScheduleCompletionStatus,
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
@@ -130,12 +130,26 @@ impl Client {
         r#type: super::AuthenticationType,
         username: &str,
         password: &str,
-    ) -> Result<(uuid::Uuid, uuid::Uuid, Permissions, Vec<String>), anyhow::Error> {
+    ) -> Result<super::SftpAuth, anyhow::Error> {
         tracing::debug!("getting sftp auth");
 
         self.retry(
             || super::get_sftp_auth(self, r#type, username, password),
             Self::retry_sftp_auth_errors,
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip(self, entries))]
+    pub async fn get_permissions(
+        &self,
+        entries: &[(uuid::Uuid, uuid::Uuid)],
+    ) -> Result<super::PermissionsBatch, anyhow::Error> {
+        tracing::debug!("getting permissions of {} users", entries.len());
+
+        self.retry(
+            || super::get_permissions(self, entries),
+            Self::skip_client_errors,
         )
         .await
     }

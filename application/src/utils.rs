@@ -211,18 +211,27 @@ pub fn is_valid_utf8_slice(s: &[u8]) -> bool {
     }
 }
 
-pub async fn read_limited_multipart_field(
+pub async fn read_limited_multipart_bytes(
     field: &mut axum::extract::multipart::Field<'_>,
     max_len: usize,
-) -> Result<String, anyhow::Error> {
-    let mut buf = String::new();
+) -> Result<Vec<u8>, anyhow::Error> {
+    let mut buf = Vec::new();
     while let Some(chunk) = field.chunk().await? {
         if buf.len().saturating_add(chunk.len()) > max_len {
             anyhow::bail!("multipart field exceeds maximum length of {max_len} bytes");
         }
-        buf.push_str(&String::from_utf8_lossy(&chunk));
+        buf.extend_from_slice(&chunk);
     }
     Ok(buf)
+}
+
+pub async fn read_limited_multipart_field(
+    field: &mut axum::extract::multipart::Field<'_>,
+    max_len: usize,
+) -> Result<String, anyhow::Error> {
+    let buf = read_limited_multipart_bytes(field, max_len).await?;
+
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 pub fn strip_paths(value: &mut serde_json::Value, paths: &[&str]) {
@@ -568,6 +577,34 @@ impl CmpExt for Path {
                     .map(|b| b.to_ascii_lowercase()),
             )
     }
+}
+
+/// serde-saphyr expands every alias into a full copy of its anchor, so a few hundred KB of
+/// aliases can materialize into many GB; YAML parsed from untrusted input never needs them.
+pub fn yaml_deserialize_options() -> serde_saphyr::Options {
+    serde_saphyr::options! {
+        alias_limits: serde_saphyr::alias_limits! {
+            max_alias_expansions_per_anchor: 0,
+        },
+    }
+}
+
+/// Whether the error comes from a budget or alias limit rather than malformed YAML.
+pub fn is_yaml_limit_error(mut err: &serde_saphyr::Error) -> bool {
+    while let serde_saphyr::Error::AliasError { error, .. }
+    | serde_saphyr::Error::WithSnippet { error, .. } = err
+    {
+        err = error;
+    }
+
+    matches!(
+        err,
+        serde_saphyr::Error::Budget { .. }
+            | serde_saphyr::Error::AliasExpansionLimitExceeded { .. }
+            | serde_saphyr::Error::AliasReplayLimitExceeded { .. }
+            | serde_saphyr::Error::AliasReplayStackDepthExceeded { .. }
+            | serde_saphyr::Error::AliasReplayCounterOverflow { .. }
+    )
 }
 
 #[cfg(target_os = "linux")]

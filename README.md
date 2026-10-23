@@ -183,6 +183,8 @@ system:
     ddup_bak:
       # how many threads to use when creating a ddup-bak backup
       create_threads: 4
+      # how many threads to use when restoring a ddup-bak backup
+      restore_threads: 4
       # the compression format to use for each ddup-bak chunk
       # none, deflate, gzip, brotli, zstd
       compression_format: zstd
@@ -290,7 +292,6 @@ ignore_panel_wings_upgrades: false
 - add support for `ignored_files` in the file upload jwt
 - allow transferring backups in server transfers
 - reworked file operations so progress can be tracked via websocket events and in the background
-- add per-server upload/download bandwidth limits (`build.bandwidth`, in bits per second, 0 means no limit), enforced over netlink with tbf + fq_codel inside the container network namespace on start and live on config sync, works with docker and podman, rootful (needs CAP_NET_ADMIN and CAP_SYS_ADMIN) or rootless (needs user namespaces), can be turned off per node with `docker.bandwidth.enabled`
 
 ### Shell
 

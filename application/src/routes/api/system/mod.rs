@@ -42,15 +42,22 @@ mod get {
         (status = OK, body = inline(Response)),
     ))]
     pub async fn route(state: GetState) -> ApiResponseResult {
-        let enabled = state.config.load().docker.bandwidth.enabled;
-        let result = match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            crate::server::bandwidth::ready(&state.config),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("bandwidth readiness check timed out")),
+        let (enabled, result) = match state.executor.bandwidth() {
+            Some(bandwidth) => (
+                bandwidth.enabled(),
+                match tokio::time::timeout(std::time::Duration::from_secs(2), bandwidth.ready())
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(anyhow::anyhow!("bandwidth readiness check timed out")),
+                },
+            ),
+            None => (
+                false,
+                Err(anyhow::anyhow!(
+                    "bandwidth limits are not supported by this server executor"
+                )),
+            ),
         };
 
         ApiResponse::new_serialized(Response {
