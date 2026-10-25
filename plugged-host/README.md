@@ -26,6 +26,8 @@ says which panel feature needs which addition.
 Never build on the panel box. `build.sh` copies the tree to the build host (ssh alias `plugged-build`,
 the box that builds the panel), builds the `release-fast` profile (no LTO, incremental, see
 `Cargo.toml`) and fetches the binary. `wings-rs version` names the commit (`1.2.5:<commit>@main`).
+It builds inside a Debian 12 container (`BUILD_IMAGE`, default `rust:1.99-bookworm`), so the binary
+needs glibc 2.34 at most and also runs on Debian 12 nodes; `BUILD_IMAGE=` builds on the host instead.
 
 ```bash
 plugged-host/check.sh                 # rustfmt (files copied back), clippy, tests, on the build host
