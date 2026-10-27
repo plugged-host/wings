@@ -1,20 +1,41 @@
-![Calagopus Logo](https://calagopus.com/fulllogo.svg)
-
-# Calagopus Wings
+# plugged.host Wings
 
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg?logo=rust)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/github/license/calagopus/wings?color=blue)](https://github.com/calagopus/wings/blob/main/LICENSE)
-[![GitHub issues](https://img.shields.io/github/issues/calagopus/wings)](https://github.com/calagopus/wings/issues)
-[![GitHub stars](https://img.shields.io/github/stars/calagopus/wings)](https://github.com/calagopus/wings/stargazers)
-[![Discord](https://img.shields.io/discord/1429911351777824892?label=discord&logo=discord&color=5865F2)](https://discord.gg/uSM8tvTxBV)
+[![License](https://img.shields.io/github/license/plugged-host/wings?color=blue)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/plugged-host/wings)](https://github.com/plugged-host/wings/releases)
 
-A rewrite of [Pterodactyl Wings](https://github.com/pterodactyl/wings) in the Rust programming language. This rewrite aims to be 100% API compatible while implementing new features, better performance and more stability.
+The node daemon for [plugged.host Calagopus](https://github.com/plugged-host/panel): a fork of
+[Calagopus Wings](https://github.com/calagopus/wings), the Rust rewrite of Pterodactyl Wings, with what
+the panel's features need on the node. Like the panel, it is edited directly in its source and merges
+upstream's `main`.
 
-[Todo](https://notes.rjns.dev/workspace/cb7ccae8-0508-4f90-9161-d1e69b0ca8f0/uAVAL7iHSQpDk1SiSUPL1)
+## What the fork adds
+
+- `GET /api/public/resources` (no token): the node's memory, disk and CPU (total, used, free, allocated),
+  for placement and node telemetry.
+- `GET /api/system/load`, `GET /api/system/processes`, `GET /api/servers/{uuid}/processes`: load, every
+  container's processes and outgoing connections, for node telemetry and abuse protection.
+- `POST /api/system/orphans`: removes a server the panel no longer has (node failover, moves).
+- `build.cpu_weight` and `build.cpu_burst` in a server's configuration (CPU shares, burst cores).
+- A schedule's restart step leaves a stopped server stopped (the panel's start gates).
+- A `.jar` is browsed like a `.zip` (the panel reads `plugin.yml` without downloading the jar).
+
+What each one is for, and what the panel does without it: the panel's
+[docs/wings.md](https://github.com/plugged-host/panel/blob/main/docs/wings.md).
+
+## Releases
+
+[GitHub releases](https://github.com/plugged-host/wings/releases) carry an x86_64 Linux binary built
+in a Debian 12 container (glibc 2.34 or newer). Releases follow the panel's version (`v3.0.0`); every
+fix is a new version. Calagopus Wings' own version (`wings-rs version`) stays upstream's.
+
+On a node, run it with its own configuration file, `wings-rs --config /etc/calagopus-wings/config.yml`:
+without `--config` it falls back to `/etc/pelican/config.yml`. Set `ignore_panel_wings_upgrades: true`
+so the panel does not replace it with upstream's build.
 
 ## Installation
 
-For installation instructions, please refer to the [Docs](https://calagopus.com/docs/wings/installation).
+As for Calagopus Wings: [calagopus.com/docs](https://calagopus.com/docs/wings/installation).
 
 ## Added Config Options
 
