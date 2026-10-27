@@ -33,6 +33,12 @@ On a node, run it with its own configuration file, `wings-rs --config /etc/calag
 without `--config` it falls back to `/etc/pelican/config.yml`. Set `ignore_panel_wings_upgrades: true`
 so the panel does not replace it with upstream's build.
 
+## Images and licence
+
+Docker images: `ghcr.io/plugged-host/wings` (`nightly` from `main`, `latest` and the version from a
+release). MIT: © noprofit.space for the fork's changes, © Calagopus and 0x7d8 for Calagopus Wings
+([LICENSE](./LICENSE)).
+
 ## Installation
 
 As for Calagopus Wings: [calagopus.com/docs](https://calagopus.com/docs/wings/installation).

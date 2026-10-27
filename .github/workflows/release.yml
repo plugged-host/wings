@@ -3,13 +3,12 @@ name: Release
 on:
   push:
     tags:
-      - "release-*"
+      - "v*" # plugged.host: releases are tagged v{VERSION}, like the panel
 
 env:
   BIN_NAME: wings-rs
   PROJECT_NAME: wings-rs
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
-  DOCKERHUB_IMAGE: docker.io/${{ github.repository }}
+  GHCR_IMAGE: ghcr.io/${{ github.repository }} # plugged.host: GHCR only, no Docker Hub
 
 jobs:
   generate-sbom:
@@ -120,7 +119,7 @@ jobs:
         id: release_info
         run: |
           RAW_TAG="${{ github.ref_name }}"
-          VERSION="${RAW_TAG#release-}"
+          VERSION="${RAW_TAG#v}"
 
           # Output the clean version to use as the Release Title
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -183,12 +182,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Prepare binaries
         run: |
           mkdir -p .docker/amd64 .docker/arm64 .docker/riscv64 .docker/ppc64le
@@ -203,7 +196,7 @@ jobs:
         id: prep_tags
         run: |
           RAW_TAG="${{ github.ref_name }}"
-          VERSION="${RAW_TAG#release-}"
+          VERSION="${RAW_TAG#v}"
 
           # Tag suffixes shared across both registries.
           SUFFIXES=("${VERSION}")
@@ -222,7 +215,7 @@ jobs:
           # Emit each suffix for both registries.
           DOCKER_TAGS=""
           for t in "${SUFFIXES[@]}"; do
-            DOCKER_TAGS="${DOCKER_TAGS}${DOCKER_TAGS:+,}${GHCR_IMAGE}:${t},${DOCKERHUB_IMAGE}:${t}"
+            DOCKER_TAGS="${DOCKER_TAGS}${DOCKER_TAGS:+,}${GHCR_IMAGE}:${t}" # plugged.host
           done
 
           echo "DOCKER_TAGS=$DOCKER_TAGS" >> $GITHUB_ENV
@@ -248,16 +241,6 @@ jobs:
           sbom-path: sbom/sbom-source.cyclonedx.json
           push-to-registry: true
 
-      - name: Attach source SBOM attestation to image (Docker Hub)
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ env.DOCKERHUB_IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          sbom-path: sbom/sbom-source.cyclonedx.json
-          push-to-registry: true
-
       - name: Sign image (GHCR)
         run: cosign sign --yes ${{ env.GHCR_IMAGE }}@${{ steps.build.outputs.digest }}
 
-      - name: Sign image (Docker Hub)
-        run: cosign sign --yes ${{ env.DOCKERHUB_IMAGE }}@${{ steps.build.outputs.digest }}

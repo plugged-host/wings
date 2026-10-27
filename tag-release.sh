@@ -19,7 +19,7 @@ if [[ ! $VERSION =~ $REGEX ]]; then
     exit 1
 fi
 
-TAG_NAME="release-$VERSION"
+TAG_NAME="v$VERSION" # plugged.host: releases are tagged v{VERSION}
 
 echo "Applying tag: $TAG_NAME..."
 
