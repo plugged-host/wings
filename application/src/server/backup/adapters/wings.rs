@@ -434,7 +434,16 @@ impl BackupCreateExt for WingsBackup {
                 // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
                 let threads = crate::server::fast_lane::FastLane::of(server)
                     .await
-                    .threads(server.app_state.config.load().system.backups.wings.create_threads);
+                    .threads(
+                        server
+                            .app_state
+                            .config
+                            .load()
+                            .system
+                            .backups
+                            .wings
+                            .create_threads,
+                    );
                 let sources = server.filesystem.async_read_dir_all(Path::new("")).await?;
                 let writer = LimitedWriter::new_with_bytes_per_second(
                     file,

@@ -63,7 +63,12 @@ impl FastLane {
     /// The threads to unpack an archive of `server` with: `api.file_decompression_threads` for
     /// its lane.
     pub async fn decompression_threads(server: &super::InnerServer) -> usize {
-        let base = server.app_state.config.load().api.file_decompression_threads;
+        let base = server
+            .app_state
+            .config
+            .load()
+            .api
+            .file_decompression_threads;
 
         Self::of(server).await.threads(base)
     }
@@ -93,11 +98,7 @@ pub trait ResticBackupLane {
 }
 
 impl ResticBackupLane for tokio::process::Command {
-    fn backup_lane(
-        &mut self,
-        lane: FastLane,
-        environment: &BTreeMap<String, String>,
-    ) -> &mut Self {
+    fn backup_lane(&mut self, lane: FastLane, environment: &BTreeMap<String, String>) -> &mut Self {
         if matches!(lane, FastLane::Burst(_))
             && !environment.contains_key("RESTIC_READ_CONCURRENCY")
             && std::env::var_os("RESTIC_READ_CONCURRENCY").is_none()
@@ -262,7 +263,10 @@ mod tests {
         let output = match output {
             Ok(output) if output.status.success() => output,
             Ok(output) => {
-                eprintln!("skipping, nice failed: {}", String::from_utf8_lossy(&output.stderr));
+                eprintln!(
+                    "skipping, nice failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 return Ok(());
             }
             Err(err) => {

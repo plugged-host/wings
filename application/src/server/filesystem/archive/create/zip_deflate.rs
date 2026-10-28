@@ -315,7 +315,13 @@ mod tests {
                 .compression_level(Some(6))
                 .large_file(true),
         )?;
-        write_deflated_body(&mut archive, &pool, &mut Cursor::new(data), data.len() as u64, 6)?;
+        write_deflated_body(
+            &mut archive,
+            &pool,
+            &mut Cursor::new(data),
+            data.len() as u64,
+            6,
+        )?;
 
         // an entry after it, so its end has to be right for this one to be found
         archive.start_file("after", ::zip::write::SimpleFileOptions::default())?;
@@ -330,7 +336,11 @@ mod tests {
 
         assert_eq!(entry.compression(), ::zip::CompressionMethod::Deflated);
         assert_eq!(entry.size(), data.len() as u64, "{name} has the wrong size");
-        assert_eq!(entry.crc32(), crc32fast::hash(data), "{name} has the wrong crc");
+        assert_eq!(
+            entry.crc32(),
+            crc32fast::hash(data),
+            "{name} has the wrong crc"
+        );
 
         // reading it to the end also checks the crc against the data
         let mut read = Vec::with_capacity(data.len());
@@ -437,7 +447,10 @@ mod tests {
             let mut archive = ::zip::ZipArchive::new(Cursor::new(bytes))?;
             let mut after = String::new();
             archive.by_name("after")?.read_to_string(&mut after)?;
-            assert_eq!(after, "after the big entry", "the entry after {len} bytes broke");
+            assert_eq!(
+                after, "after the big entry",
+                "the entry after {len} bytes broke"
+            );
         }
 
         Ok(())
@@ -460,7 +473,10 @@ mod tests {
             data.len() as u64 + 1,
             6,
         );
-        assert!(result.is_err(), "a body shorter than its length was accepted");
+        assert!(
+            result.is_err(),
+            "a body shorter than its length was accepted"
+        );
 
         Ok(())
     }

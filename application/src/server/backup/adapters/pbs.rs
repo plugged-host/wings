@@ -240,7 +240,16 @@ impl BackupCreateExt for PbsBackup {
             // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
             let compression_threads = crate::server::fast_lane::FastLane::of(server)
                 .await
-                .threads(server.app_state.config.load().system.backups.pbs.create_threads);
+                .threads(
+                    server
+                        .app_state
+                        .config
+                        .load()
+                        .system
+                        .backups
+                        .pbs
+                        .create_threads,
+                );
 
             async move {
                 let mut writer = PbsBackupWriter::connect(&config, &backup_id, backup_time).await?;
