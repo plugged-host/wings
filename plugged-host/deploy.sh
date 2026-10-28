@@ -27,7 +27,7 @@ ssh "$NODE" 'set -euo pipefail
   for _ in $(seq 1 30); do
     code=$(curl -sk -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port:-8443}/api/system" || true)
     if [ "$code" = 401 ]; then
-      echo "==> up ($($BIN --config /etc/calagopus-wings/config.yml version | head -1))"
+      echo "==> up ($($BIN --config /etc/calagopus-wings/config.yml version 2>/dev/null | head -1))"
       exit 0
     fi
     sleep 2
