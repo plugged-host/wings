@@ -114,6 +114,8 @@ mod post {
         let progress = Arc::new(AtomicU64::new(0));
         let total = Arc::new(AtomicU64::new(0));
         let files_processed = Arc::new(AtomicU64::new(0));
+        // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
+        let lane = crate::server::fast_lane::FastLane::of(&server).await;
 
         let (identifier, task) =
             server
@@ -187,7 +189,7 @@ mod post {
                                             .system
                                             .backups
                                             .compression_level,
-                                        threads: state.config.load().api.file_compression_threads,
+                                        threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                     },
                                 )
                                 .await
@@ -205,7 +207,7 @@ mod post {
                                             .system
                                             .backups
                                             .compression_level,
-                                        threads: state.config.load().api.file_compression_threads,
+                                        threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                     },
                                 )
                                 .await
@@ -223,7 +225,7 @@ mod post {
                                             .system
                                             .backups
                                             .compression_level,
-                                        threads: state.config.load().api.file_compression_threads,
+                                        threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                     },
                                 )
                                 .await

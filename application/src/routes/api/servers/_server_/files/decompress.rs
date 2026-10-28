@@ -109,6 +109,8 @@ mod post {
         let progress = Arc::new(AtomicU64::new(0));
         let total = Arc::new(AtomicU64::new(0));
         let files_processed = Arc::new(AtomicU64::new(0));
+        // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
+        let threads = crate::server::fast_lane::FastLane::decompression_threads(&server).await;
 
         let (identifier, task) = server
             .filesystem
@@ -132,7 +134,11 @@ mod post {
                                 files_processed,
                             ),
                             Some(total),
-                            crate::server::filesystem::archive::ExtractOptions::default(),
+                            // plugged.host: burst operations
+                            crate::server::filesystem::archive::ExtractOptions {
+                                threads: Some(threads),
+                                ..Default::default()
+                            },
                         )
                         .await
                 },

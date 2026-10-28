@@ -19,6 +19,12 @@ upstream's `main`.
 - `build.cpu_weight` and `build.cpu_burst` in a server's configuration (CPU shares, burst cores).
 - A schedule's restart step leaves a stopped server stopped (the panel's start gates).
 - A `.jar` is browsed like a `.zip` (the panel reads `plugin.yml` without downloading the jar).
+- Burst operations: a server with burst CPU (`build.cpu_burst`, the panel's paying members) gets
+  `1 + cpu_burst / 100` times the node's threads for archiving, unpacking and backups (up to the
+  node's cores) and restic reads more files at once; other servers' restic backups run at a lower
+  priority. `api.burst_operations: false` turns it off.
+- Big ZIP entries (64 MiB and up) are deflated in 1 MiB chunks on all of the archive's threads,
+  pigz-style, instead of on one (every server).
 
 What each one is for, and what the panel does without it: the panel's
 [docs/wings.md](https://github.com/plugged-host/panel/blob/main/docs/wings.md).
@@ -96,6 +102,10 @@ api:
   file_decompression_threads: 4
   # how many threads to use when compressing .gz/.xz/.7z/.zip, 0 means all available cores
   file_compression_threads: 2
+  # plugged.host: servers with burst CPU (build.cpu_burst) get 1 + cpu_burst / 100 times the compression,
+  # decompression and backup create threads (up to all cores) and a higher restic read concurrency,
+  # the others' restic backups run at nice 10
+  burst_operations: true
   # how often a jwt can be used to download a file/backup until expiry, 0 means unlimited (2 minimum recommended)
   max_jwt_uses: 5
   # how many http requests per second are written to the log before the rest are counted and summarized, 0 means unlimited

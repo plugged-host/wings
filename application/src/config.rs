@@ -129,6 +129,10 @@ fn api_request_log_limit() -> usize {
 fn api_public_resources() -> bool {
     true
 }
+// plugged.host: faster archives and backups for servers with burst CPU (server/fast_lane.rs)
+fn api_burst_operations() -> bool {
+    true
+}
 
 fn system_root_directory() -> SystemPath {
     #[cfg(unix)]
@@ -816,6 +820,11 @@ nestify::nest! {
             /// plugged.host: answer `GET /api/public/resources` (the node's RAM, disk and CPU) without a token
             #[serde(default = "api_public_resources")]
             pub public_resources: bool,
+            /// plugged.host: servers with burst CPU (`build.cpu_burst`, paying members) get more
+            /// threads for archives, unpacking and backups, other servers' restic backups run at a
+            /// lower priority (server/fast_lane.rs)
+            #[serde(default = "api_burst_operations")]
+            pub burst_operations: bool,
             #[serde(default)]
             #[schema(value_type = Vec<String>)]
             pub trusted_proxies: Vec<cidr::IpCidr>,

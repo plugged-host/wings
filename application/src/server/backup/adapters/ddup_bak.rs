@@ -386,6 +386,10 @@ impl BackupCreateExt for DdupBakBackup {
         };
 
         let server = server.clone();
+        // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
+        let threads = crate::server::fast_lane::FastLane::of(&server)
+            .await
+            .threads(server.app_state.config.load().system.backups.ddup_bak.create_threads);
         let archive_task =
             tokio::task::spawn_blocking(move || -> Result<(u64, u64), anyhow::Error> {
                 let base_path = server.filesystem.base_path.clone();
@@ -448,14 +452,7 @@ impl BackupCreateExt for DdupBakBackup {
                             }
                         })
                     }),
-                    server
-                        .app_state
-                        .config
-                        .load()
-                        .system
-                        .backups
-                        .ddup_bak
-                        .create_threads,
+                    threads, // plugged.host: burst operations
                 )?;
 
                 repository.save()?;

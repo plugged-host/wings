@@ -13,6 +13,7 @@ mod pxar;
 mod seven_zip;
 mod tar;
 mod zip;
+mod zip_deflate; // plugged.host: big zip entries deflated on the pool
 
 pub use itaf::*;
 pub use pxar::*;

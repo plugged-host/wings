@@ -22,6 +22,7 @@ pub mod collab;
 pub mod configuration;
 pub mod diff;
 pub mod executor;
+pub mod fast_lane; // plugged.host: burst operations
 pub mod filesystem;
 pub mod firewall;
 pub mod installation;

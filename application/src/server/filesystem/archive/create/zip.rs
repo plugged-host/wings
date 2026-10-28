@@ -1,4 +1,5 @@
 use super::ArchiveProgress;
+use super::zip_deflate::{DirectBody, Spliced}; // plugged.host: big entries deflated on the pool
 use crate::{
     io::{
         SafeSliceExt, SafeSliceMutExt,
@@ -52,7 +53,7 @@ pub async fn create_zip<W: Write + Seek + Send + 'static>(
     tokio::task::spawn_blocking(move || {
         let writer = AbortWriter::new(destination, listener.clone());
         let pipeline = Pipeline::new(
-            zip::ZipWriter::new(writer),
+            zip::ZipWriter::new(Spliced::new(writer)), // plugged.host: see zip_deflate.rs
             filesystem,
             progress,
             listener,
@@ -60,7 +61,7 @@ pub async fn create_zip<W: Write + Seek + Send + 'static>(
         )?;
 
         let archive = pipeline.write(base, sources, is_ignored)?;
-        let mut inner = archive.finish()?.into_inner();
+        let mut inner = archive.finish()?.into_inner().into_inner(); // plugged.host: Spliced
         inner.flush()?;
 
         Ok(inner)
@@ -272,6 +273,39 @@ impl EntryWriter {
         Ok(())
     }
 
+    /// plugged.host: [`Self::write_file`] for an entry of [`DIRECT_BYTES`] or more, deflated in
+    /// chunks on `pool` (zip_deflate.rs) instead of on the merger alone. An entry that looks
+    /// incompressible is still stored, by [`Self::write_file`].
+    fn write_file_parallel<Z: Write + Seek + DirectBody>(
+        &self,
+        archive: &mut zip::ZipWriter<Z>,
+        pool: &rayon::ThreadPool,
+        entry: &Entry,
+        read_buffer: &mut [u8],
+    ) -> Result<(), anyhow::Error> {
+        let file = self.filesystem.open(&entry.path)?;
+
+        if is_incompressible(&file, entry.len, read_buffer).unwrap_or(false) {
+            return self.write_file(archive, entry, read_buffer);
+        }
+
+        let reader = AbortReader::new(file, self.listener.clone());
+        let reader = self.progress.counting_reader(reader);
+        let mut reader = FixedReader::new_with_fixed_bytes(reader, entry.len as usize);
+
+        archive.start_file(&entry.name, entry.deflated(self.level))?;
+        super::zip_deflate::write_deflated_body(
+            archive,
+            pool,
+            &mut reader,
+            entry.len,
+            self.level as u32,
+        )?;
+        self.progress.increment_files();
+
+        Ok(())
+    }
+
     fn write_entry<Z: Write + Seek>(
         &self,
         archive: &mut zip::ZipWriter<Z>,
@@ -337,9 +371,12 @@ struct Pipeline<Z: Write + Seek> {
     window: u64,
 
     read_buffer: Vec<u8>,
+
+    /// plugged.host: big entries are deflated in chunks on the pool (zip_deflate.rs)
+    parallel_deflate: bool,
 }
 
-impl<Z: Write + Seek> Pipeline<Z> {
+impl<Z: Write + Seek + DirectBody> Pipeline<Z> {
     fn new(
         archive: zip::ZipWriter<Z>,
         filesystem: CapFilesystem,
@@ -369,6 +406,8 @@ impl<Z: Write + Seek> Pipeline<Z> {
             in_flight: 0,
             window: window_bytes(threads),
             read_buffer: crate::io::mem_buffer(crate::BUFFER_SIZE),
+            // plugged.host: one thread gains nothing, a streamed zip cannot take the body
+            parallel_deflate: Z::TAKES_BODY && threads > 1,
         })
     }
 
@@ -376,6 +415,16 @@ impl<Z: Write + Seek> Pipeline<Z> {
         if matches!(entry.kind, EntryKind::File) && entry.len >= DIRECT_BYTES {
             self.submit()?;
             self.drain(self.submitted)?;
+
+            // plugged.host: deflated in chunks on the pool where the destination allows it
+            if self.parallel_deflate {
+                return self.writer.write_file_parallel(
+                    &mut self.archive,
+                    &self.pool,
+                    &entry,
+                    &mut self.read_buffer,
+                );
+            }
 
             return self
                 .writer

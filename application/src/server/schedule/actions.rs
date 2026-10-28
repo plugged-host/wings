@@ -1739,6 +1739,8 @@ impl ScheduleAction {
                 let bytes_processed = Arc::new(AtomicU64::new(0));
                 let bytes_total = Arc::new(AtomicU64::new(0));
                 let files_processed = Arc::new(AtomicU64::new(0));
+                // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
+                let lane = crate::server::fast_lane::FastLane::of(server).await;
 
                 let (_, task) = server
                     .filesystem
@@ -1812,7 +1814,7 @@ impl ScheduleAction {
                                                     .system
                                                     .backups
                                                     .compression_level,
-                                                threads: state.config.load().api.file_compression_threads,
+                                                threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                             },
                                         )
                                         .await
@@ -1831,7 +1833,7 @@ impl ScheduleAction {
                                                     .system
                                                     .backups
                                                     .compression_level,
-                                                threads: state.config.load().api.file_compression_threads,
+                                                threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                             },
                                         )
                                         .await
@@ -1850,7 +1852,7 @@ impl ScheduleAction {
                                                     .system
                                                     .backups
                                                     .compression_level,
-                                                threads: state.config.load().api.file_compression_threads,
+                                                threads: lane.threads(state.config.load().api.file_compression_threads), // plugged.host: burst operations
                                             },
                                         )
                                         .await
@@ -1965,6 +1967,9 @@ impl ScheduleAction {
                 let bytes_processed = Arc::new(AtomicU64::new(0));
                 let bytes_total = Arc::new(AtomicU64::new(0));
                 let files_processed = Arc::new(AtomicU64::new(0));
+                // plugged.host: more threads for servers with burst CPU (server/fast_lane.rs)
+                let threads =
+                    crate::server::fast_lane::FastLane::decompression_threads(server).await;
 
                 let (_, task) = server
                     .filesystem
@@ -1988,7 +1993,11 @@ impl ScheduleAction {
                                         files_processed,
                                     ),
                                     Some(bytes_total),
-                                    crate::server::filesystem::archive::ExtractOptions::default(),
+                                    // plugged.host: burst operations
+                                    crate::server::filesystem::archive::ExtractOptions {
+                                        threads: Some(threads),
+                                        ..Default::default()
+                                    },
                                 )
                                 .await
                         },

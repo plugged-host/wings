@@ -13,6 +13,7 @@ use crate::{
             Backup, BackupCleanExt, BackupCreateExt, BackupExt, BackupFindExt, BackupStream,
             BackupStreamCreateExt, BackupStreamExt, BackupTestExt, DumpReader,
         },
+        fast_lane::{FastLane, ResticBackupLane}, // plugged.host: burst operations
         filesystem::{
             archive::StreamableArchiveFormat,
             cap::FileType,
@@ -765,6 +766,10 @@ impl BackupCreateExt for ResticBackup {
             )
         };
 
+        // plugged.host: more files read at once for servers with burst CPU, a lower priority for
+        // the others (server/fast_lane.rs)
+        let lane = FastLane::of(server).await;
+
         let repository_lock = Self::repository_lock(&configuration).await;
         let repository_guard = repository_lock.read().await;
         let mut retried = false;
@@ -786,6 +791,7 @@ impl BackupCreateExt for ResticBackup {
                 .arg(&write_limit)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                .backup_lane(lane, &configuration.environment) // plugged.host
                 .spawn()?;
 
             let mut line_reader = tokio::io::BufReader::new(child.take_stdout()?).lines();
