@@ -31,7 +31,8 @@ fix is a new version. Calagopus Wings' own version (`wings-rs version`) stays up
 
 On a node, run it with its own configuration file, `wings-rs --config /etc/calagopus-wings/config.yml`:
 without `--config` it falls back to `/etc/pelican/config.yml`. Set `ignore_panel_wings_upgrades: true`
-so the panel does not replace it with upstream's build.
+so the panel does not replace it with upstream's build. How plugged.host builds, deploys and rolls it
+back: [plugged-host/README.md](./plugged-host/README.md).
 
 ## Images and licence
 

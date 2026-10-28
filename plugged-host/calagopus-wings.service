@@ -1,6 +1,5 @@
-# plugged.host: Calagopus Wings (github.com/plugged-host/wings), next to Pelican Wings (wings.service).
-# Its own config, data (/var/lib/calagopus-wings), ports (API 8443, SFTP 2023) and Docker network
-# (calagopus_nw, 172.19.0.0/16); --config is pinned so it never reads /etc/pelican/config.yml.
+# plugged.host: Calagopus Wings (github.com/plugged-host/wings) on a game node (plugged-host/README.md).
+# --config is pinned: without it wings-rs falls back to /etc/pelican/config.yml.
 [Unit]
 Description=Calagopus Wings Daemon
 After=docker.service

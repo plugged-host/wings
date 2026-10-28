@@ -2,8 +2,8 @@
 
 plugged.host's node daemon: [Calagopus Wings](https://github.com/calagopus/wings) (wings-rs), the
 counterpart of plugged.host's panel ([plugged-host/panel](https://github.com/plugged-host/panel)).
-plugged.host's changes go directly into this source, like the panel's; this folder holds what is only
-plugged.host's: the build profile's scripts, the service and this guide.
+Every game node runs it. plugged.host's changes go directly into this source, like the panel's; this
+folder holds what is only plugged.host's: the build and deploy scripts, the service and this guide.
 
 ## What the fork changes
 
@@ -21,59 +21,84 @@ says which panel feature needs which addition.
 | A `.jar` is browsed like a `.zip` (`files/contents` on `/plugins/x.jar/plugin.yml`), so the panel reads a plugin's or mod's descriptor without downloading the jar | `server/filesystem/mod.rs` |
 | Build profile `release-fast` (no LTO, incremental) | `Cargo.toml` |
 
+## On a node
+
+| What | Where |
+|---|---|
+| Unit | `calagopus-wings` ([`calagopus-wings.service`](calagopus-wings.service)) |
+| Binary | `/usr/local/bin/calagopus-wings`, the previous one kept as `calagopus-wings.previous` |
+| Config | `/etc/calagopus-wings/config.yml` (it holds the node's panel token: root only, never in git) |
+| Logs | `journalctl -u calagopus-wings` |
+
+Always pass `--config /etc/calagopus-wings/config.yml` (the unit does): without it wings-rs falls
+back to `/etc/pelican/config.yml` when its own default is missing. The config has
+`ignore_panel_wings_upgrades: true`, so the panel never swaps this build for an upstream release.
+
+The nodes that ran Pelican's Go Wings until 2026-10-27 were switched to this fork in place: their
+config keeps the old data directory, Docker network, ports and SFTP host key. The old `wings` unit
+stays disabled there; never start it, it would fight this one over the same ports and containers.
+
 ## Build and deploy
 
-Never build on the panel box. `build.sh` copies the tree to the build host (ssh alias `plugged-build`,
-the box that builds the panel), builds the `release-fast` profile (no LTO, incremental, see
-`Cargo.toml`) and fetches the binary. `wings-rs version` names the commit (`1.2.5:<commit>@main`).
+Never build on the panel's webserver box. `build.sh` copies the tree to the build host (ssh alias
+`BUILD_HOST`, default `plugged-build`), builds the `release-fast` profile and fetches the binary.
 It builds inside a Debian 12 container (`BUILD_IMAGE`, default `rust:1.99-bookworm`), so the binary
 needs glibc 2.34 at most and also runs on Debian 12 nodes; `BUILD_IMAGE=` builds on the host instead.
+`wings-rs version` names the commit (`<upstream version>:<commit>@main`).
 
 ```bash
+cd /var/www/plugged.host/wings
 plugged-host/check.sh                 # rustfmt (files copied back), clippy, tests, on the build host
 git commit … && git push              # the binary names the commit
 plugged-host/build.sh                 # -> target/plugged-host/wings-rs
-plugged-host/deploy.sh <node>         # -> /usr/local/bin/calagopus-wings, restart, health check, rollback
+plugged-host/deploy.sh <node>         # one node, by its ssh alias
 ```
 
-Server containers keep running across a restart. The node's config has
-`ignore_panel_wings_upgrades: true`, so the panel never swaps this build for an upstream release.
+`deploy.sh` copies the binary to the node, keeps the old one as `calagopus-wings.previous`,
+restarts the unit and waits for the API (a 401 without a token means it is listening). If it does
+not come up, it puts the previous binary back. Server containers keep running across the restart
+(`KillMode=process`). Deploy one node first, check it in the panel (Admin › Nodes), then the rest.
+The node list (ssh aliases) is in plugged.host's private ops docs.
 
-## A node next to Pelican Wings
+**Roll back** by hand on the node:
 
-A node can run this next to Pelican's Wings (nl1 does, for the Pelican dev panel). Nothing is shared:
+```bash
+cp -p /usr/local/bin/calagopus-wings.previous /usr/local/bin/calagopus-wings
+systemctl restart calagopus-wings
+```
 
-| | Pelican Wings | Calagopus Wings |
-|---|---|---|
-| Unit, binary | `wings`, `/usr/local/bin/wings` | `calagopus-wings` (`calagopus-wings.service`), `/usr/local/bin/calagopus-wings` |
-| Config | `/etc/pelican/config.yml` | `/etc/calagopus-wings/config.yml`, pinned with `--config` |
-| Data | `/var/lib/pelican` | `/var/lib/calagopus-wings` |
-| API, SFTP | 8080, 2022 | 8443, 2023 |
-| Docker network | `pelican_nw`, 172.18.0.0/16, `fdba:17c8:6c94::/64` | `calagopus_nw`, 172.19.0.0/16, `fdba:17c8:6c95::/64` |
-| Game ports | the Pelican panel's allocations | the panel's allocations, a range Pelican does not deploy to |
+Or deploy an older build: check out its commit, `build.sh`, `deploy.sh <node>`.
 
-Always pass `--config /etc/calagopus-wings/config.yml`: without it wings-rs falls back to
-`/etc/pelican/config.yml` once its own is missing, and `configure` would rewrite Pelican's config.
+## A new node
 
-Setting one up:
-
-1. In the panel (Admin › Nodes): a node with URL `https://<fqdn>:8443` and SFTP port 2023, then
-   allocations on `0.0.0.0` with the node's FQDN as alias, in a port range the other panel does not
-   use. Create an enrollment code on the node.
-2. On the node, as root:
+1. In the panel (Admin › Nodes): the node in its location, role `internal` until it is ready, URL
+   `https://<fqdn>:<api port>` and its SFTP port; allocations on `0.0.0.0` with the node's FQDN as
+   alias. Create an enrollment code on the node.
+2. On the node, as root, with Docker installed:
 
    ```bash
    install -m 755 wings-rs /usr/local/bin/calagopus-wings
    install -d -m 700 /etc/calagopus-wings
-   calagopus-wings --config /etc/calagopus-wings/config.yml configure --enroll <code> --panel-url https://calagopus.plugged.host
+   calagopus-wings --config /etc/calagopus-wings/config.yml configure --enroll <code> --panel-url https://<panel>
    ```
 
 3. In `/etc/calagopus-wings/config.yml`: `api.ssl` (`enabled: true`, the node's certificate, e.g.
-   `/etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem`), the Docker network's
-   `interface`/`interfaces.v4`/`interfaces.v6` on the subnets above, and
-   `ignore_panel_wings_upgrades: true`.
+   `/etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem`), `ignore_panel_wings_upgrades: true`,
+   and the data directory (`system.data`) under `allowed_mounts` (devboxes mount their game
+   server's volume).
 4. `calagopus-wings.service` into `/etc/systemd/system/`, then
    `systemctl daemon-reload && systemctl enable --now calagopus-wings`.
+5. Check: the node's page in Admin › Nodes answers, and
+   `curl https://<fqdn>:<api port>/api/public/resources` answers without a token. Then role `game`.
+
+The node baseline (SSH, firewall, OOM protection, backups) is in plugged.host's private ops docs.
+
+## Releases
+
+GitHub releases follow the panel's version (`v3.0.0`), cut only when Wings changed:
+`./tag-release.sh 3.0.4` pushes the tag `v3.0.4`, the Release workflow builds the binaries and the
+images (`ghcr.io/plugged-host/wings`) and leaves a draft release to publish. The panel's release
+notes name the Wings release that goes with it.
 
 ## Keeping up with upstream
 
