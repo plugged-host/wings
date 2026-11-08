@@ -55,7 +55,8 @@ release). MIT: © noprofit.space for the fork's changes, © Calagopus and 0x7d8 
 
 ## Installation
 
-As for Calagopus Wings: [calagopus.com/docs](https://calagopus.com/docs/wings/installation).
+[Wings](https://docs.plugged.host/nodes/wings/) installs `calagopus-wings` from the latest release.
+The rest is as for Calagopus Wings: [calagopus.com/docs](https://calagopus.com/docs/wings/installation).
 
 ## Added Config Options
 
