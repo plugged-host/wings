@@ -49,7 +49,7 @@ mod post {
         )?;
 
         let client = reqwest::Client::builder()
-            .user_agent("Calagopus Wings (https://github.com/calagopus/wings)")
+            .user_agent("plugged.host Wings (https://github.com/plugged-host/wings)")
             .connect_timeout(std::time::Duration::from_secs(30))
             .build()?;
         let token = data.token.as_deref();

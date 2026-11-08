@@ -7,7 +7,7 @@ on:
 
 env:
   BIN_NAME: wings-rs
-  PROJECT_NAME: wings-rs
+  PROJECT_NAME: calagopus-wings
   GHCR_IMAGE: ghcr.io/${{ github.repository }} # plugged.host: GHCR only, no Docker Hub
 
 jobs:
@@ -75,13 +75,13 @@ jobs:
       - name: Prepare binary with platform name
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/$BIN_NAME-${{ matrix.build }}"
+          cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/${{ env.PROJECT_NAME }}-${{ matrix.build }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.PROJECT_NAME }}-${{ matrix.build }}
-          path: dist/${{ env.BIN_NAME }}-${{ matrix.build }}
+          path: dist/${{ env.PROJECT_NAME }}-${{ matrix.build }}
 
   create-multiarch-image:
     name: Create multi-arch Docker image
@@ -129,10 +129,10 @@ jobs:
       - name: Prepare binaries
         run: |
           mkdir -p .docker/amd64 .docker/arm64 .docker/riscv64 .docker/ppc64le .docker/s390x
-          cp dist/${{ env.PROJECT_NAME }}-x86_64-linux/${{ env.BIN_NAME }}-x86_64-linux .docker/amd64/calagopus-wings
-          cp dist/${{ env.PROJECT_NAME }}-aarch64-linux/${{ env.BIN_NAME }}-aarch64-linux .docker/arm64/calagopus-wings
-          cp dist/${{ env.PROJECT_NAME }}-riscv64-linux/${{ env.BIN_NAME }}-riscv64-linux .docker/riscv64/calagopus-wings
-          cp dist/${{ env.PROJECT_NAME }}-ppc64le-linux/${{ env.BIN_NAME }}-ppc64le-linux .docker/ppc64le/calagopus-wings
+          cp dist/${{ env.PROJECT_NAME }}-x86_64-linux/${{ env.PROJECT_NAME }}-x86_64-linux .docker/amd64/calagopus-wings
+          cp dist/${{ env.PROJECT_NAME }}-aarch64-linux/${{ env.PROJECT_NAME }}-aarch64-linux .docker/arm64/calagopus-wings
+          cp dist/${{ env.PROJECT_NAME }}-riscv64-linux/${{ env.PROJECT_NAME }}-riscv64-linux .docker/riscv64/calagopus-wings
+          cp dist/${{ env.PROJECT_NAME }}-ppc64le-linux/${{ env.PROJECT_NAME }}-ppc64le-linux .docker/ppc64le/calagopus-wings
 
           chmod +x .docker/*/calagopus-wings
 

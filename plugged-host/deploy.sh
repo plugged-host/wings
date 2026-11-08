@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs a built Wings binary on a node and restarts it, rolling back if it does not come up.
 #
-#   plugged-host/deploy.sh <ssh host> [binary]      # default target/plugged-host/wings-rs
+#   plugged-host/deploy.sh <ssh host> [binary]      # default target/plugged-host/calagopus-wings
 #
 # The node runs it as /usr/local/bin/calagopus-wings (unit calagopus-wings, plugged-host/
 # calagopus-wings.service); the previous binary stays next to it as calagopus-wings.previous.
@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NODE=${1:?usage: deploy.sh <ssh host> [binary]}
-BINARY=${2:-$ROOT/target/plugged-host/wings-rs}
+BINARY=${2:-$ROOT/target/plugged-host/calagopus-wings}
 
 echo "==> $("$BINARY" --config /nonexistent version 2>/dev/null | head -1) -> $NODE"
 rsync -a "$BINARY" "$NODE:/usr/local/bin/calagopus-wings.new"

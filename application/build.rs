@@ -17,9 +17,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=FUSEQUOTA_RELEASE");
     println!("cargo:rerun-if-env-changed=FUSEQUOTA_BINARY_PATH");
+    println!("cargo:rerun-if-changed=../VERSION");
+    println!("cargo:rerun-if-env-changed=WINGS_VERSION");
     println!("cargo:rerun-if-env-changed=WINGS_UPGRADE_PROVIDER");
     println!("cargo:rerun-if-env-changed=WINGS_UPGRADE_REPOSITORY");
     println!("cargo:rerun-if-env-changed=WINGS_UPGRADE_API_URL");
+    println!("cargo:rerun-if-env-changed=WINGS_UPGRADE_TAG_PREFIX");
 
     let target_arch =
         std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "unknown".to_string());
@@ -29,10 +32,32 @@ fn main() {
 
     println!("cargo:rustc-env=CARGO_TARGET={target_arch}-{target_env}");
 
+    handle_release();
     handle_git_info();
     handle_fusequota(&target_arch, &target_os);
     handle_seccomp();
     handle_upgrade_source();
+}
+
+/// plugged.host: the release's version, the `VERSION` file at the repository root (e.g. `3.1.0`).
+/// Cargo's own version (`CARGO_PKG_VERSION`) stays upstream's. `WINGS_VERSION` overrides the file
+/// for a build of your own, like `PANEL_RELEASE` does for the panel.
+fn handle_release() {
+    let version = std::env::var("WINGS_VERSION")
+        .ok()
+        .map(|version| version.trim().to_string())
+        .filter(|version| !version.is_empty())
+        .or_else(|| {
+            std::fs::read_to_string("../VERSION")
+                .ok()
+                .map(|version| version.trim().to_string())
+        })
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| {
+            std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string())
+        });
+
+    println!("cargo:rustc-env=WINGS_VERSION={version}");
 }
 
 #[allow(clippy::panic)]
@@ -223,8 +248,10 @@ fn handle_upgrade_source() {
     };
 
     let provider = read("WINGS_UPGRADE_PROVIDER", "github");
-    let repository = read("WINGS_UPGRADE_REPOSITORY", "calagopus/wings");
+    // plugged.host: releases come from the fork, tagged v{VERSION}, not upstream's release-{version}.
+    let repository = read("WINGS_UPGRADE_REPOSITORY", "plugged-host/wings");
     let api_url = read("WINGS_UPGRADE_API_URL", "https://api.github.com");
+    let tag_prefix = read("WINGS_UPGRADE_TAG_PREFIX", "v");
 
     if !matches!(provider.as_str(), "github") {
         panic!("unsupported WINGS_UPGRADE_PROVIDER {provider:?}, expected one of: github");
@@ -235,9 +262,13 @@ fn handle_upgrade_source() {
     if !api_url.starts_with("https://") && !api_url.starts_with("http://") {
         panic!("WINGS_UPGRADE_API_URL {api_url:?} must be an http(s) url");
     }
+    if tag_prefix.is_empty() {
+        panic!("WINGS_UPGRADE_TAG_PREFIX must not be empty");
+    }
 
     println!("cargo:rustc-env=WINGS_UPGRADE_PROVIDER={provider}");
     println!("cargo:rustc-env=WINGS_UPGRADE_REPOSITORY={repository}");
+    println!("cargo:rustc-env=WINGS_UPGRADE_TAG_PREFIX={tag_prefix}");
     println!(
         "cargo:rustc-env=WINGS_UPGRADE_API_URL={}",
         api_url.trim_end_matches('/')

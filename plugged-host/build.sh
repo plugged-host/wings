@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Builds Wings on the build host and fetches the binary.
 #
-#   plugged-host/build.sh            # -> target/plugged-host/wings-rs
+#   plugged-host/build.sh            # -> target/plugged-host/calagopus-wings
 #
 # The build host is an ssh alias (BUILD_HOST, default plugged-build, the Ryzen box that builds the
 # panel too) with Rust; never build on the panel box. The repository is copied over with its .git, so
-# the binary knows its commit (`wings-rs version` -> 1.2.5:<commit>@main). Commit before building
-# anything that gets deployed.
+# the binary knows its commit (`calagopus-wings version` -> v3.1.0:<commit>@main).
+# Commit before building anything that gets deployed.
 #
 # By default it builds inside a Debian 12 container (BUILD_IMAGE), so the binary needs glibc 2.34 at
 # most and runs on every node, the Debian 12 ones (glibc 2.36) included; a build on the host itself
@@ -49,7 +49,7 @@ else
 fi
 
 mkdir -p "$OUT"
-rsync -a "$BUILD_HOST:$BUILD_DIR/target/$PROFILE/wings-rs" "$OUT/wings-rs.new"
-mv -f "$OUT/wings-rs.new" "$OUT/wings-rs"
+rsync -a "$BUILD_HOST:$BUILD_DIR/target/$PROFILE/wings-rs" "$OUT/calagopus-wings.new"
+mv -f "$OUT/calagopus-wings.new" "$OUT/calagopus-wings"
 
-echo "==> built $("$OUT/wings-rs" --config /nonexistent version 2>/dev/null | head -1 || true), needs glibc $(grep -ao 'GLIBC_2\.[0-9]*' "$OUT/wings-rs" | sort -Vu | tail -1 | cut -d_ -f2)"
+echo "==> built $("$OUT/calagopus-wings" --config /nonexistent version 2>/dev/null | head -1 || true), needs glibc $(grep -ao 'GLIBC_2\.[0-9]*' "$OUT/calagopus-wings" | sort -Vu | tail -1 | cut -d_ -f2)"

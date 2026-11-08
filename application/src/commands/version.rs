@@ -15,15 +15,17 @@ impl crate::commands::CliCommand<VersionArgs> for VersionCommand {
         Box::new(|_config, _arg_matches| {
             Box::pin(async move {
                 println!(
-                    "github.com/calagopus/wings {} ({})",
+                    "plugged.host/wings v{} ({})",
                     crate::full_version(),
                     crate::TARGET
                 );
+                println!("upstream Calagopus Wings {}", crate::UPSTREAM_VERSION);
                 println!(
-                    "upgrades from {} {} ({})",
+                    "upgrades from {} {} ({}, tag {}{{version}})",
                     crate::upgrade::PROVIDER,
                     crate::upgrade::REPOSITORY,
-                    crate::upgrade::API_URL
+                    crate::upgrade::API_URL,
+                    crate::upgrade::TAG_PREFIX
                 );
                 if !crate::bins::FUSEQUOTA_VERSION.is_empty() {
                     println!(

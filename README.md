@@ -31,14 +31,21 @@ What each one is for, and what the panel does without it: the panel's
 
 ## Releases
 
-[GitHub releases](https://github.com/plugged-host/wings/releases) carry an x86_64 Linux binary built
-in a Debian 12 container (glibc 2.34 or newer). Releases follow the panel's version (`v3.0.0`); every
-fix is a new version. Calagopus Wings' own version (`wings-rs version`) stays upstream's.
+[GitHub releases](https://github.com/plugged-host/wings/releases) carry
+`calagopus-wings-<arch>-linux` for `x86_64`, `aarch64`, `riscv64` and `ppc64le`, built in a Debian 12
+container (glibc 2.34 or newer). Releases follow the panel's version (`v3.1.0`); every fix is a new
+version. The release's version comes from `VERSION` at the repository root (`WINGS_VERSION`
+overrides it); Calagopus's own Cargo version stays upstream's.
 
-On a node, run it with its own configuration file, `wings-rs --config /etc/calagopus-wings/config.yml`:
-without `--config` it falls back to `/etc/pelican/config.yml`. Set `ignore_panel_wings_upgrades: true`
-so the panel does not replace it with upstream's build. How plugged.host builds, deploys and rolls it
-back: [plugged-host/README.md](./plugged-host/README.md).
+The Cargo package is still upstream's `wings-rs`, but the binary is installed as `calagopus-wings`,
+the name the panel's commands use. On a node, run it with its own configuration file,
+`calagopus-wings --config /etc/calagopus-wings/config.yml`: without `--config` it falls back to
+`/etc/pelican/config.yml`.
+
+The binary updates itself and the panel upgrades it from this repository's releases, tagged
+`v{VERSION}`. Keep `ignore_panel_wings_upgrades: false` (the default) to let the panel apply them;
+set it to `true` only to manage updates by hand. How plugged.host builds, deploys and rolls it back:
+[plugged-host/README.md](./plugged-host/README.md).
 
 ## Images and licence
 

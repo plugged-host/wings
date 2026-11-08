@@ -58,10 +58,10 @@ impl crate::commands::CliCommand<DiagnosticsArgs> for DiagnosticsCommand {
                 };
 
                 let mut output = String::with_capacity(1024);
-                writeln!(output, "wings-rs - diagnostics report")?;
+                writeln!(output, "calagopus-wings - diagnostics report")?;
 
                 write_header(&mut output, "versions")?;
-                write_line(&mut output, "wings-rs", &crate::full_version())?;
+                write_line(&mut output, "calagopus-wings", &crate::full_version())?;
                 write_line(
                     &mut output,
                     "docker",
@@ -78,7 +78,7 @@ impl crate::commands::CliCommand<DiagnosticsArgs> for DiagnosticsCommand {
                     &versions.os.unwrap_or_else(|| "unknown".to_string()),
                 )?;
 
-                write_header(&mut output, "wings-rs configuration")?;
+                write_header(&mut output, "calagopus-wings configuration")?;
                 write_line(&mut output, "panel location", &config.remote)?;
                 writeln!(output)?;
                 write_line(
@@ -177,7 +177,7 @@ impl crate::commands::CliCommand<DiagnosticsArgs> for DiagnosticsCommand {
                 )?;
                 write_line(&mut output, "debug mode", &format!("{}", config.debug))?;
 
-                write_header(&mut output, "latest wings-rs logs")?;
+                write_header(&mut output, "latest calagopus-wings logs")?;
                 match File::open(
                     config
                         .system
@@ -271,7 +271,7 @@ impl crate::commands::CliCommand<DiagnosticsArgs> for DiagnosticsCommand {
                     .post("https://api.pastes.dev/post")
                     .header(
                         "User-Agent",
-                        format!("wings-rs diagnostics/v{}", crate::VERSION),
+                        format!("calagopus-wings diagnostics/v{}", crate::VERSION),
                     )
                     .header("Content-Type", "text/plain")
                     .header("Accept", "application/json")

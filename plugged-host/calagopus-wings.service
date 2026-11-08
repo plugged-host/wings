@@ -1,5 +1,5 @@
 # plugged.host: Calagopus Wings (github.com/plugged-host/wings) on a game node (plugged-host/README.md).
-# --config is pinned: without it wings-rs falls back to /etc/pelican/config.yml.
+# --config is pinned: without it Wings falls back to /etc/pelican/config.yml.
 [Unit]
 Description=Calagopus Wings Daemon
 After=docker.service

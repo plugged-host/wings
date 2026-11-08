@@ -11,6 +11,7 @@ use tokio::io::AsyncWriteExt;
 pub const PROVIDER: &str = env!("WINGS_UPGRADE_PROVIDER");
 pub const REPOSITORY: &str = env!("WINGS_UPGRADE_REPOSITORY");
 pub const API_URL: &str = env!("WINGS_UPGRADE_API_URL");
+pub const TAG_PREFIX: &str = env!("WINGS_UPGRADE_TAG_PREFIX");
 
 const MAX_BINARY_SIZE: u64 = 512 * 1024 * 1024;
 const SMOKE_TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -81,8 +82,6 @@ mod github {
     use anyhow::Context;
     use serde::Deserialize;
 
-    const TAG_PREFIX: &str = "release-";
-
     #[derive(Deserialize)]
     struct GithubRelease {
         tag_name: String,
@@ -112,9 +111,10 @@ mod github {
                 )
             }
             VersionRequest::Exact(version) => format!(
-                "{}/repos/{}/releases/tags/{TAG_PREFIX}{version}",
+                "{}/repos/{}/releases/tags/{}{version}",
                 super::API_URL,
-                super::REPOSITORY
+                super::REPOSITORY,
+                super::TAG_PREFIX
             ),
         };
 
@@ -139,7 +139,7 @@ mod github {
 
         let version = release
             .tag_name
-            .strip_prefix(TAG_PREFIX)
+            .strip_prefix(super::TAG_PREFIX)
             .and_then(|version| semver::Version::parse(version).ok())
             .with_context(|| format!("release tag {:?} is not a version", release.tag_name))?;
 
@@ -217,8 +217,8 @@ fn asset_name() -> Option<String> {
     };
 
     match std::env::consts::OS {
-        "linux" => Some(format!("wings-rs-{arch}-linux")),
-        "windows" => Some(format!("wings-rs-{arch}-windows.exe")),
+        "linux" => Some(format!("calagopus-wings-{arch}-linux")),
+        "windows" => Some(format!("calagopus-wings-{arch}-windows.exe")),
         _ => None,
     }
 }
@@ -498,22 +498,22 @@ mod tests {
             ));
         }
 
-        let expected = semver::Version::new(1, 2, 7);
-        for exact in ["1.2.7", "v1.2.7"] {
+        let expected = semver::Version::new(3, 1, 0);
+        for exact in ["3.1.0", "v3.1.0"] {
             match exact.parse::<VersionRequest>() {
                 Ok(VersionRequest::Exact(version)) => assert_eq!(version, expected),
                 _ => panic!("{exact} not parsed as an exact version"),
             }
         }
 
-        match "1.3.0-pre.1".parse::<VersionRequest>() {
+        match "3.1.0-pre.1".parse::<VersionRequest>() {
             Ok(VersionRequest::Exact(version)) => {
-                assert_eq!(version, semver::Version::parse("1.3.0-pre.1").unwrap())
+                assert_eq!(version, semver::Version::parse("3.1.0-pre.1").unwrap())
             }
             _ => panic!("pre-release not accepted"),
         }
 
-        for invalid in ["vv1.2.3", "", "v", "garbage", "1.2", "latest1"] {
+        for invalid in ["vv3.1.0", "", "v", "garbage", "3.1", "latest1"] {
             assert!(
                 invalid.parse::<VersionRequest>().is_err(),
                 "{invalid:?} accepted"
@@ -525,13 +525,19 @@ mod tests {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn asset_name_matches_ci_x86_64() {
-        assert_eq!(asset_name().as_deref(), Some("wings-rs-x86_64-linux"));
+        assert_eq!(
+            asset_name().as_deref(),
+            Some("calagopus-wings-x86_64-linux")
+        );
     }
 
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     #[test]
     fn asset_name_matches_ci_aarch64() {
-        assert_eq!(asset_name().as_deref(), Some("wings-rs-aarch64-linux"));
+        assert_eq!(
+            asset_name().as_deref(),
+            Some("calagopus-wings-aarch64-linux")
+        );
     }
 
     // on_api_origin
@@ -669,7 +675,7 @@ mod tests {
     #[test]
     fn smoke_test_checks_version_output() {
         tokio_test::block_on(async {
-            let expected = semver::Version::new(1, 2, 7);
+            let expected = semver::Version::new(3, 1, 0);
             let script = |output: &str, code: u8| {
                 format!(
                     "#!/bin/sh\n[ \"$1\" = \"--version\" ] || exit 3\necho '{output}'\nexit {code}\n"
@@ -677,10 +683,10 @@ mod tests {
             };
 
             let cases = [
-                ("calagopus-wings 1.2.7:abc@main", 0, true),
-                ("calagopus-wings 1.2.7", 0, true),
-                ("calagopus-wings 1.2.8:abc@main", 0, false),
-                ("calagopus-wings 1.2.7", 1, false),
+                ("calagopus-wings 3.1.0:abc@main", 0, true),
+                ("calagopus-wings 3.1.0", 0, true),
+                ("calagopus-wings 3.1.1:abc@main", 0, false),
+                ("calagopus-wings 3.1.0", 1, false),
                 ("calagopus-wings", 0, false),
             ];
 

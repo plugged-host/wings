@@ -289,7 +289,7 @@ impl BackupCreateExt for PbsBackup {
                     "backup_time": backup_time,
                     "archive": ARCHIVE_NAME,
                     "catalog": pbs_client::catalog::CATALOG_NAME,
-                    "wings_version": env!("CARGO_PKG_VERSION"),
+                    "wings_version": crate::VERSION,
                 });
                 let meta_file = writer
                     .upload_blob(META_BLOB_NAME, &serde_json::to_vec(&metadata)?)

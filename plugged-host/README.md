@@ -32,9 +32,10 @@ says which panel feature needs which addition.
 | Config | `/etc/calagopus-wings/config.yml` (it holds the node's panel token: root only, never in git) |
 | Logs | `journalctl -u calagopus-wings` |
 
-Always pass `--config /etc/calagopus-wings/config.yml` (the unit does): without it wings-rs falls
-back to `/etc/pelican/config.yml` when its own default is missing. The config has
-`ignore_panel_wings_upgrades: true`, so the panel never swaps this build for an upstream release.
+Always pass `--config /etc/calagopus-wings/config.yml` (the unit does): without it Wings falls
+back to `/etc/pelican/config.yml` when its own default is missing. The config keeps
+`ignore_panel_wings_upgrades: false`, so the panel upgrades this build from `plugged-host/wings`
+releases; set it to `true` only to manage updates by hand.
 
 The nodes that ran Pelican's Go Wings until 2026-10-27 were switched to this fork in place: their
 config keeps the old data directory, Docker network, ports and SFTP host key. The old `wings` unit
@@ -46,13 +47,14 @@ Never build on the panel's webserver box. `build.sh` copies the tree to the buil
 `BUILD_HOST`, default `plugged-build`), builds the `release-fast` profile and fetches the binary.
 It builds inside a Debian 12 container (`BUILD_IMAGE`, default `rust:1.99-bookworm`), so the binary
 needs glibc 2.34 at most and also runs on Debian 12 nodes; `BUILD_IMAGE=` builds on the host instead.
-`wings-rs version` names the commit (`<upstream version>:<commit>@main`).
+`calagopus-wings version` names the release and commit (`v3.1.0:<commit>@main`), and the Calagopus
+version it is based on.
 
 ```bash
 cd /var/www/plugged.host/wings
 plugged-host/check.sh                 # rustfmt (files copied back), clippy, tests, on the build host
 git commit … && git push              # the binary names the commit
-plugged-host/build.sh                 # -> target/plugged-host/wings-rs
+plugged-host/build.sh                 # -> target/plugged-host/calagopus-wings
 plugged-host/deploy.sh <node>         # one node, by its ssh alias
 ```
 
@@ -79,13 +81,13 @@ Or deploy an older build: check out its commit, `build.sh`, `deploy.sh <node>`.
 2. On the node, as root, with Docker installed:
 
    ```bash
-   install -m 755 wings-rs /usr/local/bin/calagopus-wings
+   install -m 755 calagopus-wings /usr/local/bin/calagopus-wings
    install -d -m 700 /etc/calagopus-wings
    calagopus-wings --config /etc/calagopus-wings/config.yml configure --enroll <code> --panel-url https://<panel>
    ```
 
 3. In `/etc/calagopus-wings/config.yml`: `api.ssl` (`enabled: true`, the node's certificate, e.g.
-   `/etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem`), `ignore_panel_wings_upgrades: true`,
+   `/etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem`), `ignore_panel_wings_upgrades: false`,
    and the data directory (`system.data`) under `allowed_mounts` (devboxes mount their game
    server's volume).
 4. `calagopus-wings.service` into `/etc/systemd/system/`, then
@@ -97,10 +99,21 @@ The node baseline (SSH, firewall, OOM protection, backups) is in plugged.host's 
 
 ## Releases
 
-GitHub releases follow the panel's version (`v3.0.0`), cut only when Wings changed:
-`./tag-release.sh 3.0.4` pushes the tag `v3.0.4`, the Release workflow builds the binaries and the
-images (`ghcr.io/plugged-host/wings`) and leaves a draft release to publish. The panel's release
-notes name the Wings release that goes with it.
+GitHub releases follow the panel's version (`v3.1.0`), cut only when Wings changed. Bump `VERSION`
+at the repository root, commit and push, then `./tag-release.sh 3.1.0` (it refuses a tag that does
+not match `VERSION` or a dirty tree) pushes the tag. The Release workflow builds
+`calagopus-wings-<arch>-linux` and the images (`ghcr.io/plugged-host/wings`) and leaves a draft
+release to publish (`gh release edit v3.1.0 --draft=false --latest`). The panel's release notes name
+the Wings release that goes with it.
+
+## Upgrades
+
+The binary knows the release it was built from (`VERSION`) and resolves updates from
+`plugged-host/wings` releases tagged `v{VERSION}`: `GET /api/system/upgrade/check` compares it with
+the latest published release, and `POST /api/system/upgrade` downloads, verifies and swaps the
+`calagopus-wings-<arch>-linux` asset. The panel's Admin › Nodes › Upgrade uses the same endpoints.
+The build-time overrides are `WINGS_UPGRADE_REPOSITORY`, `WINGS_UPGRADE_TAG_PREFIX` and
+`WINGS_UPGRADE_API_URL`.
 
 ## Keeping up with upstream
 

@@ -49,7 +49,10 @@ mod utils;
 
 use payload::Payload;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// plugged.host: the release's version (`VERSION` at the repository root, e.g. `3.1.0`).
+const VERSION: &str = env!("WINGS_VERSION");
+/// Calagopus's own package version; the release version above is what plugged.host names builds by.
+const UPSTREAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_COMMIT: &str = env!("CARGO_GIT_COMMIT");
 const GIT_BRANCH: &str = env!("CARGO_GIT_BRANCH");
 const TARGET: &str = env!("CARGO_TARGET");
@@ -416,7 +419,11 @@ async fn main_rt() {
             tracing::info!("                    __/ | | '__/ __|");
             tracing::info!("                   |___/  | |  \\__ \\");
             tracing::info!("{: >25} |_|  |___/", crate::VERSION);
-            tracing::info!("github.com/calagopus/wings#{}\n", crate::GIT_COMMIT);
+            tracing::info!(
+                "plugged.host/wings#{} (Calagopus Wings {})\n",
+                crate::GIT_COMMIT,
+                crate::UPSTREAM_VERSION
+            );
         }
     }
 
